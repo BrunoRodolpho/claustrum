@@ -1,0 +1,26 @@
+{
+  "name": "${projectName}",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "conformance": "claustrum conformance --conductor ./src/index.ts"
+  },
+  "dependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@claustrum/conformance": "^0.1.0",
+    "@claustrum/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@claustrum/cli": "^0.1.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

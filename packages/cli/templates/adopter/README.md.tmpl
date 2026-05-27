@@ -1,0 +1,33 @@
+# ${projectName}
+
+Adopter project scaffolded by `claustrum init`. Wires a claustrum
+`Conductor` from in-memory test doubles so the runtime boots without
+external services. Swap stubs for production providers as you grow.
+
+## Quickstart
+
+```sh
+pnpm install
+pnpm dev                  # boot the conductor and run one turn
+pnpm conformance          # run the runtime invariant suite
+```
+
+## What's in here
+
+- `src/index.ts` — exports `createConductor()`; the CLI loads this for
+  `claustrum replay` and `claustrum conformance`.
+- `.env.example` — env vars you would set when switching to real
+  providers (Anthropic, OpenAI, Postgres, Redis).
+
+## Next steps
+
+1. Replace `InMemoryMemoryProvider` with `@claustrum/memory-postgres`.
+2. Replace `WebChannelStub` with `@claustrum/channel-web` (HTTP/WS) or
+   `@claustrum/channel-whatsapp` (Twilio).
+3. Replace `StubAdjudicator` with a real `Adjudicator` backed by your
+   `@adjudicate/core` Pack.
+4. Replace the toy planner with an LLM-driven planner reading a
+   `ModelProvider` (e.g. `@claustrum/anthropic`).
+
+The conductor's port interfaces are frozen at `@claustrum/core@0.1.0`;
+swap one provider at a time without touching the cognitive loop.

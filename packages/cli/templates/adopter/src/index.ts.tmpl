@@ -1,0 +1,174 @@
+/**
+ * ${className} — claustrum adopter bootstrap.
+ *
+ * Exports a `createConductor()` factory wired entirely from in-memory test
+ * doubles. Replace each stub with a production provider (Anthropic /
+ * OpenAI for `ModelProvider`, Postgres for `MemoryPort`, your kernel
+ * Adjudicator for the kernel surface, etc.) as you grow the application.
+ *
+ * Boot:
+ *   pnpm dev                      # run main()
+ *   pnpm conformance              # run the invariant suite
+ */
+
+import { buildEnvelope, type IntentEnvelope } from "@adjudicate/core";
+import {
+  createConductor as createConductorCore,
+  createToolRegistry,
+  handleTurn,
+  type CapabilityId,
+  type Conductor,
+  type DraftResponse,
+  type ExplainerPort,
+  type HandoffPort,
+  type IntentKind,
+  type Plan,
+  type PlannerPort,
+  type ResponderPort,
+  type TenantResolver,
+  type ToolDefinition,
+} from "@claustrum/core";
+import {
+  EmptyGroundingProvider,
+  InMemoryMemoryProvider,
+  InMemorySessionStore,
+  RecordingTelemetrySink,
+  StubAdjudicator,
+  WebChannelStub,
+} from "@claustrum/core/test-doubles";
+
+const ECHO_CAPABILITY = "${projectName}.echo" as CapabilityId;
+const ECHO_INTENT_KIND = "${projectName}.echo" as IntentKind;
+
+function makePlanner(): PlannerPort {
+  return {
+    async propose(state): Promise<Plan> {
+      const envelope = buildEnvelope({
+        kind: String(ECHO_INTENT_KIND),
+        payload: { text: state.perception.text },
+        actor: { principal: "llm", sessionId: state.turnId },
+        taint: "TRUSTED",
+        nonce: `nonce-${state.turnId}`,
+        createdAt: new Date().toISOString(),
+      }) as IntentEnvelope;
+      return {
+        envelopes: [envelope],
+        capabilities: [String(ECHO_CAPABILITY)],
+      };
+    },
+  };
+}
+
+function makeResponder(): ResponderPort {
+  return {
+    async respond(input): Promise<DraftResponse> {
+      if (input.decision.kind === "REFUSE") {
+        return { text: input.decision.refusal.userFacing };
+      }
+      return { text: `Echo: ${input.cognition.perception.text}` };
+    },
+  };
+}
+
+function makeExplainer(): ExplainerPort {
+  return { render: (refusal) => refusal.userFacing };
+}
+
+function makeHandoff(): HandoffPort {
+  return {
+    async queue(): Promise<void> {
+      /* no-op stub */
+    },
+  };
+}
+
+function makeTenantResolver(): TenantResolver {
+  return {
+    async resolve() {
+      return {
+        tenant: {
+          tenantId: "${projectName}",
+          displayName: "${className}",
+          locale: "en-US",
+          environment: "dev" as const,
+        },
+        state: {},
+        policy: {},
+      };
+    },
+  };
+}
+
+function makeEchoTool(): ToolDefinition<{ text: string }, { echoed: string }> {
+  return {
+    id: "${projectName}.echo.v1",
+    capability: ECHO_CAPABILITY,
+    description: "Echo the user's text. Replace with real tools.",
+    inputSchema: { type: "object" },
+    outputSchema: { type: "object" },
+    intentKind: ECHO_INTENT_KIND,
+    riskLevel: "low",
+    async execute(input): Promise<{ echoed: string }> {
+      return { echoed: input.text };
+    },
+  };
+}
+
+/**
+ * Factory consumed by `claustrum replay` and `claustrum conformance`.
+ * Returns a fully-wired Conductor with deterministic in-memory ports.
+ */
+export function createConductor(): Conductor {
+  const tools = createToolRegistry();
+  tools.register(makeEchoTool());
+  return createConductorCore({
+    adjudicator: new StubAdjudicator(),
+    memory: new InMemoryMemoryProvider(),
+    grounding: new EmptyGroundingProvider(),
+    planner: makePlanner(),
+    responder: makeResponder(),
+    explainer: makeExplainer(),
+    handoff: makeHandoff(),
+    telemetry: new RecordingTelemetrySink(),
+    session: new InMemorySessionStore(),
+    tools,
+    channels: [new WebChannelStub()],
+    tenantResolver: makeTenantResolver(),
+  });
+}
+
+async function main(): Promise<void> {
+  const conductor = createConductor();
+  const inbound = {
+    channel: "web" as const,
+    customerId: "demo",
+    conversationId: "demo-conv",
+    text: "hello, ${projectName}",
+    receivedAt: new Date().toISOString(),
+  };
+  const capsule = await conductor.openCapsule({
+    channel: inbound.channel,
+    customerId: inbound.customerId,
+    inbound,
+  });
+  try {
+    const result = await handleTurn(capsule, inbound);
+    // eslint-disable-next-line no-console
+    console.warn("decision:", result.decision.kind);
+    // eslint-disable-next-line no-console
+    console.warn("response:", result.response.text);
+  } finally {
+    await conductor.closeCapsule(capsule);
+  }
+}
+
+const isMain =
+  import.meta.url ===
+  ("file://" + (process.argv[1] ?? "").replace(/\\/g, "/"));
+if (isMain) {
+  main().catch((err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    process.exit(1);
+  });
+}
