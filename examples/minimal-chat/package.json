@@ -1,0 +1,26 @@
+{
+  "name": "@example/minimal-chat",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end claustrum reference app — single-file demo of the cognitive loop with Anthropic + in-memory stubs.",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@claustrum/anthropic": "workspace:*",
+    "@claustrum/core": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
