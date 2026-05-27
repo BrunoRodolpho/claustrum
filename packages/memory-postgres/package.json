@@ -1,0 +1,52 @@
+{
+  "name": "@claustrum/memory-postgres",
+  "version": "0.1.0",
+  "description": "Postgres + Redis MemoryProvider for @claustrum/core. Hot-cache snapshot, write-through invalidation, operational-memory boundary via Adjudicator.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "migrations",
+    "prisma"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "prisma:generate": "prisma generate --schema=prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@claustrum/core": "workspace:*",
+    "@prisma/client": "^5.20.0",
+    "ioredis": "^5.4.1"
+  },
+  "peerDependencies": {
+    "@adjudicate/core": "^1.1.0"
+  },
+  "devDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@claustrum/eslint-config": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "eslint": "^9.0.0",
+    "prisma": "^5.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

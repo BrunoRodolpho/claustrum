@@ -1,0 +1,87 @@
+// @claustrum/memory-postgres — Prisma schema for the four runtime-owned
+// memory kinds. Operational memory is intentionally absent: it lives in the
+// kernel's `intent_audit` ledger, accessed via Adjudicator.replayEnvelopesByCustomerId.
+//
+// Generator output goes to the standard @prisma/client location so adopters
+// can `npm i @prisma/client && npx prisma generate` in their own apps.
+//
+// Schema is intended to be appended into the adopter's existing schema (or
+// imported via Prisma's multi-schema support). Datasource URL is parameterized
+// — adopters supply DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Episodic — conversation history (one row per turn).
+// Partitioned by month at the SQL level (see migrations/001) — Prisma is
+// schema-aware but partition-blind, which is fine: it sees the parent table.
+// ──────────────────────────────────────────────────────────────────────────
+model claustrum_memory_episodic {
+  id              BigInt   @id @default(autoincrement())
+  customer_id     String
+  turn_id         String
+  conversation_id String
+  user_text       String?
+  response_text   String?
+  decision_kind   String?
+  intent_hash     String?
+  recorded_at     DateTime @db.Timestamptz(6)
+
+  @@index([customer_id, recorded_at(sort: Desc)])
+  @@index([conversation_id, recorded_at])
+  @@index([intent_hash])
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Semantic — durable facts about the customer. Primary key is
+// (customer_id, key) so upsert-by-key is O(1) and there's a natural
+// "one truth per fact" constraint at the schema level.
+// ──────────────────────────────────────────────────────────────────────────
+model claustrum_memory_semantic {
+  customer_id String
+  key         String
+  value       String
+  confidence  Float
+  tags        String[]
+  recorded_at DateTime @db.Timestamptz(6)
+
+  @@id([customer_id, key])
+  @@index([customer_id, confidence(sort: Desc)])
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Procedural — learned workflows. Distinct rows per workflow_kind allow a
+// customer to have many independent procedures (e.g., return-flow,
+// upgrade-flow).
+// ──────────────────────────────────────────────────────────────────────────
+model claustrum_memory_procedural {
+  id            BigInt    @id @default(autoincrement())
+  customer_id   String
+  workflow_kind String
+  description   String
+  last_used_at  DateTime? @db.Timestamptz(6)
+
+  @@index([customer_id, last_used_at(sort: Desc)])
+  @@index([customer_id, workflow_kind])
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Relational — emotional/social continuity signals.
+// ──────────────────────────────────────────────────────────────────────────
+model claustrum_memory_relational {
+  id          BigInt   @id @default(autoincrement())
+  customer_id String
+  signal_kind String
+  content     String
+  observed_at DateTime @db.Timestamptz(6)
+
+  @@index([customer_id, observed_at(sort: Desc)])
+  @@index([customer_id, signal_kind, observed_at(sort: Desc)])
+}
