@@ -1,0 +1,51 @@
+{
+  "name": "@claustrum/core",
+  "version": "0.1.0",
+  "description": "Governance-native conversational runtime spine — Conductor, Capsule, handleTurn, 13 ports. Built on @adjudicate/core.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./test-doubles": {
+      "types": "./dist/test-doubles/index.d.ts",
+      "import": "./dist/test-doubles/index.js",
+      "default": "./dist/test-doubles/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "vitest run",
+    "test:properties": "vitest run test/properties"
+  },
+  "peerDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@adjudicate/runtime": "^0.1.1"
+  },
+  "devDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@adjudicate/runtime": "^0.1.1",
+    "@claustrum/eslint-config": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "fast-check": "^3.23.1",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
