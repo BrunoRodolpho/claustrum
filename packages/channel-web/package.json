@@ -1,0 +1,43 @@
+{
+  "name": "@claustrum/channel-web",
+  "version": "0.1.0",
+  "description": "Web/HTTP ChannelDriver adapter for @claustrum/core. Pluggable render sink (WebSocket/SSE) and HMAC-SHA256 envelope attestation.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@claustrum/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@claustrum/core": "workspace:*",
+    "@claustrum/eslint-config": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
