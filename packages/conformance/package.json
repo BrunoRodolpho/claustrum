@@ -1,0 +1,44 @@
+{
+  "name": "@claustrum/conformance",
+  "version": "0.1.0",
+  "description": "Runtime-side invariant suite for @claustrum/* adopters. Asserts the load-bearing properties of the cognitive loop: tool capability indirection, single-EXECUTE per turn, prompt manifest in trace, REFUSE-renders-text, memory routes via Adjudicator, and few-shot regression parity.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "fixtures"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@claustrum/core": "workspace:^0.1.0"
+  },
+  "devDependencies": {
+    "@adjudicate/core": "^1.1.0",
+    "@claustrum/core": "workspace:*",
+    "@claustrum/eslint-config": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

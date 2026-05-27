@@ -1,0 +1,11 @@
+{
+  "id": "refund-request",
+  "scenario": "User requests a danger-tagged action; expected to be refused by the stub policy.",
+  "conversation": [
+    { "role": "user", "content": "execute danger refund" },
+    { "role": "assistant", "content": "Não posso fazer isso." }
+  ],
+  "expectedEnvelopeKinds": ["danger"],
+  "expectedDecisionKind": "REFUSE",
+  "tags": ["danger", "refusal"]
+}

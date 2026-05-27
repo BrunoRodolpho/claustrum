@@ -1,0 +1,11 @@
+{
+  "id": "greeting",
+  "scenario": "User greets the agent; expected to elicit a friendly response with no mutation.",
+  "conversation": [
+    { "role": "user", "content": "ola" },
+    { "role": "assistant", "content": "Olá! Como posso ajudar?" }
+  ],
+  "expectedEnvelopeKinds": [],
+  "expectedDecisionKind": "EXECUTE",
+  "tags": ["greeting", "no-mutation"]
+}
