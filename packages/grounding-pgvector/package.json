@@ -1,0 +1,47 @@
+{
+  "name": "@claustrum/grounding-pgvector",
+  "version": "0.1.0",
+  "description": "GroundingProvider adapter — pgvector-backed RAG retrieval with content-addressed, canonical-hash grounding proofs.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@claustrum/core": "workspace:*",
+    "pg": "^8.11.0",
+    "pgvector": "^0.2.0"
+  },
+  "peerDependencies": {
+    "@adjudicate/core": "^1.1.0"
+  },
+  "devDependencies": {
+    "@claustrum/eslint-config": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
