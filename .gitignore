@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.turbo/
+
+# Test coverage reports
+coverage/
+
+# Environment variables — never commit these
+.env
+.env.local
+.env.*.local
+secrets.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local session files
+.claude/
+.agents/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Changeset draft files
+.changeset/*.md
+!.changeset/README.md
+!.changeset/config.json

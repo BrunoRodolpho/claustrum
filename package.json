@@ -1,0 +1,31 @@
+{
+  "name": "claustrum",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Governance-native conversational runtime — the conductor of the cortical orchestra (Crick & Koch 2005). Built on @adjudicate/core.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --filter \"@claustrum/*\" build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "claustrum": "tsx packages/cli/src/bin.ts"
+  },
+  "devDependencies": {
+    "@claustrum/eslint-config": "workspace:*",
+    "@changesets/cli": "^2.27.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.32.1"
+}
