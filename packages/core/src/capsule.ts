@@ -28,7 +28,7 @@ import type { HandoffPort } from "./ports/handoff.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
 import type { ResponderPort } from "./ports/responder.js";
-import type { SessionPort } from "./ports/session.js";
+import type { Session, SessionPort } from "./ports/session.js";
 import type { TelemetryPort } from "./ports/telemetry.js";
 import type { TenantConfig } from "./ports/tenant.js";
 import type { Actor } from "./tools/types.js";
@@ -67,6 +67,14 @@ export interface Capsule {
   readonly handoff: HandoffPort;
   readonly telemetry: TelemetryPort;
   readonly session: SessionPort;
+  /**
+   * The session snapshot loaded for THIS turn, bound at openCapsule time.
+   * Read this instead of `session.current()` — `current()` is a process-global
+   * "most recently loaded" accessor and returns the wrong session under
+   * concurrent turns for different customers (RC-R3). The Conductor holds a
+   * per-session lock for the turn's lifetime, so this snapshot is stable.
+   */
+  readonly loadedSession: Session;
 
   // ── Kernel-bound (resolved per turn by TenantResolver) ────────────────────
   readonly state: SystemState;

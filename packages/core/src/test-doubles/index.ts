@@ -10,6 +10,7 @@
 export { InMemoryModelProvider } from "./in-memory-model-provider.js";
 export { InMemoryMemoryProvider } from "./in-memory-memory-provider.js";
 export { InMemorySessionStore } from "./in-memory-session-store.js";
+export { InMemorySessionLock } from "./in-memory-session-lock.js";
 export { WebChannelStub } from "./web-channel-stub.js";
 export { StubAdjudicator } from "./stub-adjudicator.js";
 export { RecordingTelemetrySink } from "./recording-telemetry-sink.js";

@@ -116,6 +116,7 @@ export function createConductor() {
         handoff: stubHandoff,
         telemetry: stubTelemetry,
         session: __session,
+        loadedSession: session,
         state: {},
         policy: {},
         async adjudicate(env){ return stubAdjudicator.adjudicate(env, {}, {}); },

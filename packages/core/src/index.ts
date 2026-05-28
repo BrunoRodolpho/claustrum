@@ -72,6 +72,7 @@ export type {
   WorkingMemoryFrame,
   Goal,
 } from "./ports/session.js";
+export type { SessionLock, SessionLockHandle } from "./ports/session-lock.js";
 export type {
   TelemetryPort,
   LLMTrace,

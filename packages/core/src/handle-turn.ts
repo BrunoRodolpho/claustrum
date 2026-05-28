@@ -63,7 +63,7 @@ export async function handleTurn(
     capsule.memory.recall(capsule.customerId, perception),
     capsule.grounding.retrieve(perception),
   ]);
-  const session = capsule.session.current();
+  const session = capsule.loadedSession;
   const cognition: CognitiveState = {
     perception,
     memory,

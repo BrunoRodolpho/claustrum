@@ -111,6 +111,7 @@ export async function buildHarness(
     handoff: options.handoff ?? defaultHandoff,
     telemetry,
     session,
+    loadedSession: session.current(),
     state: undefined,
     policy: undefined,
     adjudicate(envelope) {
