@@ -57,7 +57,33 @@ export type DispatchResult =
       readonly to: "human" | "supervisor";
       readonly reason: string;
       readonly envelope?: IntentEnvelope;
+    }
+  | {
+      /**
+       * A port the runtime called to honor the Decision threw. Dispatch is
+       * total — it converts the throw into this typed result instead of
+       * rejecting, so handleTurn always reaches SYNTHESIZE/OBSERVE (a user
+       * reply, telemetry, and an audit outcome are produced). `message` is
+       * operator-facing and MUST NOT be rendered to the user verbatim — it can
+       * carry capability ids or internal error text.
+       */
+      readonly kind: "failed";
+      readonly phase: Decision["kind"];
+      readonly code: DispatchFailureCode;
+      readonly message: string;
+      readonly envelope?: IntentEnvelope;
     };
+
+export type DispatchFailureCode =
+  | "tool_unresolved"
+  | "tool_threw"
+  | "explainer_threw"
+  | "park_threw"
+  | "handoff_threw";
+
+function dispatchErrorMessage(e: unknown): string {
+  return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+}
 
 export async function dispatchDecision(
   decision: Decision,
@@ -81,50 +107,112 @@ export async function dispatchDecision(
         };
       }
       const capability = inferCapability(envelope);
-      const tool = capsule.tools.resolveTool(capability, capsule);
-      const result = await tool.execute(envelope.payload, capsule);
-      return {
-        kind: "executed",
-        envelope,
-        toolId: tool.id,
-        result,
-      };
+      // resolveTool throws on an unregistered capability (config drift,
+      // role-filtered visibility, hot-deploy gap) and tool.execute carries no
+      // no-throw guarantee (a refund tool can 5xx mid-call). A kernel-approved
+      // EXECUTE the runtime can't honor must NOT crash the turn.
+      try {
+        const tool = capsule.tools.resolveTool(capability, capsule);
+        try {
+          const result = await tool.execute(envelope.payload, capsule);
+          return { kind: "executed", envelope, toolId: tool.id, result };
+        } catch (e) {
+          return {
+            kind: "failed",
+            phase: "EXECUTE",
+            code: "tool_threw",
+            message: dispatchErrorMessage(e),
+            envelope,
+          };
+        }
+      } catch (e) {
+        return {
+          kind: "failed",
+          phase: "EXECUTE",
+          code: "tool_unresolved",
+          message: dispatchErrorMessage(e),
+          envelope,
+        };
+      }
     }
 
     case "REWRITE": {
       const envelope = decision.rewritten;
       const capability = inferCapability(envelope);
-      const tool = capsule.tools.resolveTool(capability, capsule);
-      const result = await tool.execute(envelope.payload, capsule);
-      return {
-        kind: "rewritten_and_executed",
-        envelope,
-        toolId: tool.id,
-        result,
-        reason: decision.reason,
-      };
+      try {
+        const tool = capsule.tools.resolveTool(capability, capsule);
+        try {
+          const result = await tool.execute(envelope.payload, capsule);
+          return {
+            kind: "rewritten_and_executed",
+            envelope,
+            toolId: tool.id,
+            result,
+            reason: decision.reason,
+          };
+        } catch (e) {
+          return {
+            kind: "failed",
+            phase: "REWRITE",
+            code: "tool_threw",
+            message: dispatchErrorMessage(e),
+            envelope,
+          };
+        }
+      } catch (e) {
+        return {
+          kind: "failed",
+          phase: "REWRITE",
+          code: "tool_unresolved",
+          message: dispatchErrorMessage(e),
+          envelope,
+        };
+      }
     }
 
     case "REFUSE": {
-      const userText = capsule.explainer.render(decision.refusal);
-      return {
-        kind: "refused",
-        userText,
-        code: decision.refusal.code,
-        refusalKind: decision.refusal.kind,
-      };
+      // "REFUSE -> non-empty user-facing text" is an invariant, so an
+      // explainer template miss must still yield a refusal — fall back to a
+      // generic safe text rather than crashing or returning a bare failure.
+      try {
+        const userText = capsule.explainer.render(decision.refusal);
+        return {
+          kind: "refused",
+          userText,
+          code: decision.refusal.code,
+          refusalKind: decision.refusal.kind,
+        };
+      } catch {
+        return {
+          kind: "refused",
+          userText: GENERIC_REFUSAL_TEXT,
+          code: decision.refusal.code,
+          refusalKind: decision.refusal.kind,
+        };
+      }
     }
 
     case "REQUEST_CONFIRMATION": {
       const envelope = pickEnvelope(plan);
       if (envelope !== undefined) {
-        // Park the envelope so the next-turn reply can be matched.
-        // The confirmation token is the envelope's intentHash by default.
-        await capsule.session.parkPendingConfirmation(
-          envelope,
-          envelope.intentHash,
-          decision.prompt,
-        );
+        // Park the envelope so the next-turn reply can be matched. If parking
+        // fails the confirmation can never be honored, so surface a failure
+        // rather than falsely telling the user "awaiting confirmation".
+        try {
+          await capsule.session.parkPendingConfirmation(
+            envelope,
+            envelope.intentHash,
+            decision.prompt,
+          );
+        } catch (e) {
+          return {
+            kind: "failed",
+            phase: "REQUEST_CONFIRMATION",
+            code: "park_threw",
+            message: dispatchErrorMessage(e),
+            envelope,
+          };
+        }
       }
       return {
         kind: "awaiting_confirmation",
@@ -139,12 +227,22 @@ export async function dispatchDecision(
         const deferUntil = new Date(
           Date.now() + decision.timeoutMs,
         ).toISOString();
-        await capsule.session.parkDeferred(
-          envelope,
-          decision.signal,
-          deferUntil,
-          decision.timeoutMs,
-        );
+        try {
+          await capsule.session.parkDeferred(
+            envelope,
+            decision.signal,
+            deferUntil,
+            decision.timeoutMs,
+          );
+        } catch (e) {
+          return {
+            kind: "failed",
+            phase: "DEFER",
+            code: "park_threw",
+            message: dispatchErrorMessage(e),
+            envelope,
+          };
+        }
       }
       return {
         kind: "deferred",
@@ -157,7 +255,17 @@ export async function dispatchDecision(
     case "ESCALATE": {
       const envelope = pickEnvelope(plan);
       if (envelope !== undefined) {
-        await capsule.handoff.queue(envelope, decision.reason);
+        try {
+          await capsule.handoff.queue(envelope, decision.reason);
+        } catch (e) {
+          return {
+            kind: "failed",
+            phase: "ESCALATE",
+            code: "handoff_threw",
+            message: dispatchErrorMessage(e),
+            envelope,
+          };
+        }
       }
       return {
         kind: "escalated",
@@ -168,6 +276,10 @@ export async function dispatchDecision(
     }
   }
 }
+
+/** User-safe fallback when the explainer itself throws while rendering a REFUSE. */
+const GENERIC_REFUSAL_TEXT =
+  "I can't complete that request right now. Please try again or rephrase.";
 
 function pickEnvelope(plan: Plan): IntentEnvelope | undefined {
   return plan.envelopes.length > 0 ? plan.envelopes[0] : undefined;

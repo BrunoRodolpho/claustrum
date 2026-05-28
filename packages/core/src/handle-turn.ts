@@ -166,6 +166,8 @@ function buildResponseMeta(
       return { deferred: true };
     case "escalated":
       return { escalated: true };
+    case "failed":
+      return { failed: true };
     default:
       return undefined;
   }

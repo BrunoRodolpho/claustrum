@@ -48,6 +48,8 @@ export interface RenderedResponse {
     readonly awaitingConfirmation?: boolean;
     readonly deferred?: boolean;
     readonly escalated?: boolean;
+    /** A dispatch port threw; the turn degraded gracefully (no crash). */
+    readonly failed?: boolean;
   };
 }
 
