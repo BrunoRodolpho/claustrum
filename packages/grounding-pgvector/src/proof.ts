@@ -62,10 +62,22 @@ export interface BuildProofInput extends ProofHashInput {
  * arrays preserve order, `undefined` fields elided, `null` passes through.
  *
  * Mirrors `@adjudicate/canonical` `canonicalize()` exactly (locked by
- * tests/canonical-golden-vectors.json).
+ * tests/canonical-golden-vectors.json + the NFC/non-finite tests in
+ * canonical-conformance.test.ts). Strings are NFC-normalized and non-finite
+ * numbers throw — both required so this proof hasher cannot drift from the
+ * kernel's encoder (RC-X1 + DataReviewer-008 / CryptoReviewer-002).
  */
 function canonicalize(value: unknown): unknown {
   if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value.normalize("NFC");
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new RangeError(
+        `canonical-JSON: non-finite number (${String(value)}) has no canonical representation (RFC 8785 §3.2.2.3)`,
+      );
+    }
+    return value;
+  }
   if (typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(canonicalize);
 

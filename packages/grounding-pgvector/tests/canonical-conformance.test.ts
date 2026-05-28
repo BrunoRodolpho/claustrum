@@ -59,3 +59,17 @@ describe("canonical-JSON conformance with @adjudicate/canonical (RC-X1)", () => 
     expect(proofHashOf(input)).toBe(vec!.sha256);
   });
 });
+
+describe("canonical encoder rules match @adjudicate/canonical (RC-X1 drift lock)", () => {
+  it("NFC-normalizes strings (NFD and NFC hash identically) — DataReviewer-008", () => {
+    const nfc = "caf\u00e9"; // NFC: e-acute precomposed U+00E9
+    const nfd = "cafe\u0301"; // NFD: e + combining acute U+0301
+    expect(nfc).not.toBe(nfd);
+    expect(sha256OfCanonical({ name: nfc })).toBe(sha256OfCanonical({ name: nfd }));
+  });
+
+  it("throws on non-finite numbers — CryptoReviewer-002", () => {
+    expect(() => sha256OfCanonical({ x: Number.NaN })).toThrow();
+    expect(() => sha256OfCanonical({ x: Number.POSITIVE_INFINITY })).toThrow();
+  });
+});
