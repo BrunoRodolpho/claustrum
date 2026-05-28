@@ -62,6 +62,22 @@ export interface TwilioWebhookBody {
 }
 
 /**
+ * The full inbound request the webhook route forwards to the channel adapter.
+ * RC-R2 / Decision 2: the channel adapter OWNS Twilio signature verification,
+ * so it needs the request URL + `X-Twilio-Signature` header in addition to the
+ * parsed body. The route stays thin: parse the form body, capture the URL and
+ * the signature header, hand all three here.
+ */
+export interface TwilioInboundRequest {
+  /** Full URL Twilio POSTed to, including query string (use X-Original-URL behind a proxy). */
+  readonly url: string;
+  /** The `X-Twilio-Signature` request header. */
+  readonly signature: string;
+  /** Parsed `application/x-www-form-urlencoded` body. */
+  readonly body: TwilioWebhookBody;
+}
+
+/**
  * Result of `matchToParkedByReply` — augments the parked envelope with a
  * resolution intent derived from the user reply.
  */

@@ -29,11 +29,20 @@ import { attestWithGatewayKey } from "./attest.js";
 import { matchToParkedByReply } from "./parked-match.js";
 import { perceiveTwilioWebhook } from "./perceive.js";
 import { sendTwilioMessage, splitForWhatsApp } from "./render.js";
+import { verifyTwilioSignature } from "./twilio-signature.js";
 import type {
   ParkedMatch,
-  TwilioWebhookBody,
+  TwilioInboundRequest,
   WhatsAppChannelConfig,
 } from "./types.js";
+
+/** Thrown when an inbound webhook fails Twilio signature verification. The webhook route maps this to HTTP 403. */
+export class TwilioVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TwilioVerificationError";
+  }
+}
 
 const DEFAULT_INTER_CHUNK_MS = 200;
 
@@ -48,11 +57,47 @@ export class WhatsAppChannel implements ChannelDriver {
       throw new Error("WhatsAppChannel: gatewaySigningKey required");
   }
 
+  /**
+   * Verify the inbound Twilio signature, THEN normalize to a ChannelMessage.
+   *
+   * RC-R2 / Decision 2: verification is mandatory and fail-closed. `raw` MUST
+   * be a {@link TwilioInboundRequest} (url + X-Twilio-Signature + parsed body)
+   * forwarded by the thin webhook route. Without that context — or with a
+   * signature that does not match an HMAC-SHA1 over the canonical Twilio string
+   * keyed by the account auth token — the request is rejected with
+   * {@link TwilioVerificationError} and never normalized-and-adjudicated. This
+   * is the only thing standing between "any party that can POST a webhook" and
+   * a kernel-adjudicated mutation.
+   */
   async perceive(raw: unknown): Promise<ChannelMessage> {
     if (raw === null || typeof raw !== "object") {
-      throw new Error("WhatsAppChannel.perceive: raw must be an object");
+      throw new TwilioVerificationError(
+        "WhatsAppChannel.perceive: raw must be a TwilioInboundRequest { url, signature, body }",
+      );
     }
-    return perceiveTwilioWebhook(raw as TwilioWebhookBody);
+    const req = raw as Partial<TwilioInboundRequest>;
+    if (
+      typeof req.url !== "string" ||
+      typeof req.signature !== "string" ||
+      req.body === null ||
+      typeof req.body !== "object"
+    ) {
+      throw new TwilioVerificationError(
+        "WhatsAppChannel.perceive: missing verification context (url, signature, body); forward the raw Twilio request from the webhook route",
+      );
+    }
+    const verified = verifyTwilioSignature({
+      authToken: this.config.authToken,
+      signature: req.signature,
+      url: req.url,
+      params: req.body,
+    });
+    if (!verified) {
+      throw new TwilioVerificationError(
+        "WhatsAppChannel.perceive: Twilio signature verification failed",
+      );
+    }
+    return perceiveTwilioWebhook(req.body);
   }
 
   async render(response: RenderedResponse): Promise<void> {

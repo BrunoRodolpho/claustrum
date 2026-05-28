@@ -6,7 +6,7 @@
  * in a webhook route handler before the body even reaches the driver).
  */
 
-export { WhatsAppChannel } from "./whatsapp-channel.js";
+export { WhatsAppChannel, TwilioVerificationError } from "./whatsapp-channel.js";
 export {
   verifyTwilioSignature,
   type VerifyTwilioSignatureInput,
@@ -24,6 +24,7 @@ export { normalizePhone, hashPhone } from "./phone.js";
 export type {
   WhatsAppChannelConfig,
   TwilioWebhookBody,
+  TwilioInboundRequest,
   ParkedMatch,
   UserResolution,
 } from "./types.js";
