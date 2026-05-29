@@ -201,10 +201,11 @@ export function createConductor(options: ConductorOptions): Conductor {
 
     async closeCapsule(capsule: Capsule): Promise<void> {
       try {
-        // Persist THIS capsule's session (not session.current(), which is the
-        // process-global "last loaded" and may be a different customer under
-        // concurrency). The per-session lock is still held, so re-reading the
-        // session for this key returns the state THIS turn mutated.
+        // Persist THIS capsule's session. We re-read by this capsule's own
+        // (customerId, channel) rather than any global "last loaded" handle —
+        // the SessionPort has no such accessor (RC-R3 footgun removed). The
+        // per-session lock is still held, so re-reading the session for this
+        // key returns the state THIS turn mutated.
         const latest = await options.session.load(
           capsule.customerId,
           capsule.channel,

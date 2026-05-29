@@ -65,24 +65,37 @@ export interface SessionPort {
   load(customerId: string, channel: ChannelKind): Promise<Session>;
   save(session: Session): Promise<void>;
 
-  /** Convenience accessor for the current session (during a turn). */
-  current(): Session;
-
+  /**
+   * Park a REQUEST_CONFIRMATION envelope on a specific session.
+   *
+   * The target session is named explicitly by `sessionId` (===
+   * `Session.id`) rather than implied by "whichever session was loaded
+   * last". This removes the single-instance footgun (RC-R3): a port that
+   * tracked a process-global "current" session could park the envelope on
+   * the wrong customer's session under concurrent turns. No-op if no
+   * session with `sessionId` is known.
+   */
   parkPendingConfirmation(
+    sessionId: string,
     envelope: IntentEnvelope,
     confirmationToken: string,
     userPrompt: string,
   ): Promise<void>;
 
+  /** Park a DEFER envelope on the session named by `sessionId`. No-op if unknown. */
   parkDeferred(
+    sessionId: string,
     envelope: IntentEnvelope,
     signal: string,
     deferUntil: string,
     timeoutMs: number,
   ): Promise<void>;
 
-  /** Remove a parked envelope by intentHash. Called on resumption. */
-  unpark(intentHash: string): Promise<void>;
+  /**
+   * Remove a parked envelope by intentHash from the session named by
+   * `sessionId`. Called on resumption. No-op if unknown.
+   */
+  unpark(sessionId: string, intentHash: string): Promise<void>;
 
   /** True iff the session has been idle long enough to warrant memory consolidation. */
   isStale(): boolean;

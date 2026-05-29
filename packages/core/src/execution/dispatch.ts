@@ -200,6 +200,7 @@ export async function dispatchDecision(
         // rather than falsely telling the user "awaiting confirmation".
         try {
           await capsule.session.parkPendingConfirmation(
+            capsule.loadedSession.id,
             envelope,
             envelope.intentHash,
             decision.prompt,
@@ -229,6 +230,7 @@ export async function dispatchDecision(
         ).toISOString();
         try {
           await capsule.session.parkDeferred(
+            capsule.loadedSession.id,
             envelope,
             decision.signal,
             deferUntil,

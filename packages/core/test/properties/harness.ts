@@ -76,7 +76,10 @@ export async function buildHarness(
   }
 
   const customerId = options.customerId ?? "cust-test";
-  await session.load(customerId, "web");
+  // Bind the loaded session for THIS turn and read its id directly. There is
+  // no `session.current()` accessor any more (RC-R3 footgun removal) — the
+  // capsule carries the bound session as `loadedSession`.
+  const loadedSession = await session.load(customerId, "web");
 
   const channels: ChannelMap = { web: channelDriver };
 
@@ -90,7 +93,7 @@ export async function buildHarness(
     customerId,
     actor: {
       principal: "user",
-      sessionId: session.current().id,
+      sessionId: loadedSession.id,
       customerId,
       role: "customer",
     },
@@ -111,7 +114,7 @@ export async function buildHarness(
     handoff: options.handoff ?? defaultHandoff,
     telemetry,
     session,
-    loadedSession: session.current(),
+    loadedSession,
     state: undefined,
     policy: undefined,
     adjudicate(envelope) {

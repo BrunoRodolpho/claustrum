@@ -1,8 +1,11 @@
 /**
  * InMemorySessionStore — SessionPort test-double.
  *
- * Holds a single Session in memory and mutates it via `park*`/`unpark`.
- * `current()` returns the active Session for the most recent `load`.
+ * Holds sessions keyed by `${channel}:${customerId}` (=== `Session.id`)
+ * and mutates a named session via `park*`/`unpark`. There is deliberately
+ * NO process-global "current" session: every park/unpark names its target
+ * by `sessionId`, so a single store instance cannot misattribute a parked
+ * envelope to whichever session happened to load last (RC-R3 footgun).
  */
 
 import type { IntentEnvelope } from "@adjudicate/core";
@@ -15,14 +18,12 @@ import type {
 } from "../ports/session.js";
 
 export class InMemorySessionStore implements SessionPort {
-  private active: Session | undefined;
   private readonly byKey = new Map<string, Session>();
 
   async load(customerId: string, channel: ChannelKind): Promise<Session> {
     const key = `${channel}:${customerId}`;
     const existing = this.byKey.get(key);
     if (existing !== undefined) {
-      this.active = existing;
       return existing;
     }
     const fresh: Session = {
@@ -41,52 +42,44 @@ export class InMemorySessionStore implements SessionPort {
       },
     };
     this.byKey.set(key, fresh);
-    this.active = fresh;
     return fresh;
   }
 
   async save(session: Session): Promise<void> {
-    const key = `${session.channel}:${session.customerId}`;
-    this.byKey.set(key, session);
-    this.active = session;
-  }
-
-  current(): Session {
-    if (this.active === undefined) {
-      throw new Error("InMemorySessionStore.current(): no session loaded yet.");
-    }
-    return this.active;
+    // A Session's id IS its byKey key; persist under it so save and the
+    // sessionId-keyed park ops agree on where the session lives.
+    this.byKey.set(session.id, session);
   }
 
   async parkPendingConfirmation(
+    sessionId: string,
     envelope: IntentEnvelope,
     confirmationToken: string,
     userPrompt: string,
   ): Promise<void> {
-    if (this.active === undefined) return;
+    const target = this.byKey.get(sessionId);
+    if (target === undefined) return;
     const parked: ParkedEnvelope = {
       envelope,
       confirmationToken,
       userPrompt,
       parkedAt: new Date().toISOString(),
     };
-    this.active = {
-      ...this.active,
-      pendingConfirmations: [...this.active.pendingConfirmations, parked],
-    };
-    this.byKey.set(
-      `${this.active.channel}:${this.active.customerId}`,
-      this.active,
-    );
+    this.byKey.set(sessionId, {
+      ...target,
+      pendingConfirmations: [...target.pendingConfirmations, parked],
+    });
   }
 
   async parkDeferred(
+    sessionId: string,
     envelope: IntentEnvelope,
     signal: string,
     deferUntil: string,
     timeoutMs: number,
   ): Promise<void> {
-    if (this.active === undefined) return;
+    const target = this.byKey.get(sessionId);
+    if (target === undefined) return;
     const deferred: DeferredEnvelope = {
       envelope,
       signal,
@@ -94,31 +87,24 @@ export class InMemorySessionStore implements SessionPort {
       timeoutMs,
       parkedAt: new Date().toISOString(),
     };
-    this.active = {
-      ...this.active,
-      deferredEnvelopes: [...this.active.deferredEnvelopes, deferred],
-    };
-    this.byKey.set(
-      `${this.active.channel}:${this.active.customerId}`,
-      this.active,
-    );
+    this.byKey.set(sessionId, {
+      ...target,
+      deferredEnvelopes: [...target.deferredEnvelopes, deferred],
+    });
   }
 
-  async unpark(intentHash: string): Promise<void> {
-    if (this.active === undefined) return;
-    this.active = {
-      ...this.active,
-      pendingConfirmations: this.active.pendingConfirmations.filter(
+  async unpark(sessionId: string, intentHash: string): Promise<void> {
+    const target = this.byKey.get(sessionId);
+    if (target === undefined) return;
+    this.byKey.set(sessionId, {
+      ...target,
+      pendingConfirmations: target.pendingConfirmations.filter(
         (p) => p.envelope.intentHash !== intentHash,
       ),
-      deferredEnvelopes: this.active.deferredEnvelopes.filter(
+      deferredEnvelopes: target.deferredEnvelopes.filter(
         (d) => d.envelope.intentHash !== intentHash,
       ),
-    };
-    this.byKey.set(
-      `${this.active.channel}:${this.active.customerId}`,
-      this.active,
-    );
+    });
   }
 
   isStale(): boolean {

@@ -61,7 +61,6 @@ function makeSession(){
   return {
     async load(){ return session; },
     async save(){},
-    current(){ return session; },
     async parkPendingConfirmation(){},
     async parkDeferred(){},
     async unpark(){},
@@ -94,7 +93,7 @@ export function createConductor() {
     memory: stubMemory,
     tools: stubTools,
     async openCapsule(input){
-      const session = __session.current();
+      const session = await __session.load(input.customerId, input.channel);
       return {
         tenant: { tenantId: "t", displayName: "T", locale: "en", environment: "dev" },
         customerId: input.customerId,

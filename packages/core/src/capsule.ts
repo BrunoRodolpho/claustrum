@@ -69,10 +69,13 @@ export interface Capsule {
   readonly session: SessionPort;
   /**
    * The session snapshot loaded for THIS turn, bound at openCapsule time.
-   * Read this instead of `session.current()` — `current()` is a process-global
-   * "most recently loaded" accessor and returns the wrong session under
-   * concurrent turns for different customers (RC-R3). The Conductor holds a
-   * per-session lock for the turn's lifetime, so this snapshot is stable.
+   * This is the only handle to "the session this turn is acting on" — the
+   * SessionPort has no process-global `current()` accessor (its removal is
+   * the RC-R3 footgun fix: a "most recently loaded" accessor returned the
+   * wrong session under concurrent turns for different customers). Session-
+   * scoped port ops (`parkPendingConfirmation`/`parkDeferred`/`unpark`) are
+   * called with `loadedSession.id`. The Conductor holds a per-session lock
+   * for the turn's lifetime, so this snapshot is stable.
    */
   readonly loadedSession: Session;
 
