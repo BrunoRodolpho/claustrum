@@ -44,8 +44,10 @@ export type PolicyBundle = unknown;
 export interface OutcomeFilter {
   readonly customerId?: string;
   readonly intentKind?: string;
-  readonly since?: Date;
-  readonly until?: Date;
+  /** ISO 8601 timestamp string (e.g. "2024-01-01T00:00:00.000Z"). */
+  readonly since?: string;
+  /** ISO 8601 timestamp string (e.g. "2024-12-31T23:59:59.999Z"). */
+  readonly until?: string;
   readonly observed?: "succeeded" | "failed" | "withdrawn";
 }
 
