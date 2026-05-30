@@ -33,7 +33,7 @@ import type {
   Perception,
   TurnOutcome,
 } from "@claustrum/core";
-import { cacheKey, TTL_SECONDS } from "./cache-keys.js";
+import { cacheKey, TTL_SECONDS, type TtlConfig } from "./cache-keys.js";
 import { semanticSearch } from "./search.js";
 import {
   buildSnapshot,
@@ -70,6 +70,17 @@ export interface PostgresMemoryProviderDeps {
   };
   /** Minimum semantic-fact confidence included in the snapshot. Default 0.3. */
   readonly semanticMinConfidence?: number;
+  /**
+   * Optional TTL overrides (seconds). Any key omitted here falls back to
+   * the module-level `TTL_SECONDS` defaults, so existing callers are
+   * unaffected. Useful for tests or for deployments that need a longer
+   * snapshot TTL in high-traffic environments.
+   *
+   * @example
+   * createPostgresMemoryProvider({ prisma, redis, adjudicator,
+   *   ttls: { snapshot: 120 } })  // double snapshot TTL, rest unchanged
+   */
+  readonly ttls?: Partial<TtlConfig>;
 }
 
 const DEFAULTS = {
@@ -89,6 +100,11 @@ export function createPostgresMemoryProvider(
   const fanoutRelational = deps.fanout?.relational ?? DEFAULTS.relational;
   const semMinConf =
     deps.semanticMinConfidence ?? DEFAULTS.semanticMinConfidence;
+
+  // Merge caller-supplied TTL overrides with module defaults. Any key not
+  // present in deps.ttls falls back to TTL_SECONDS, preserving full
+  // back-compat for callers that do not pass ttls at all.
+  const ttls: TtlConfig = { ...TTL_SECONDS, ...deps.ttls };
 
   function reportTiming(durationMs: number, cacheHit: boolean): void {
     if (deps.onRecallTiming) {
@@ -166,7 +182,7 @@ export function createPostgresMemoryProvider(
       // assembled; failing to cache only costs the next caller a re-fetch.
       void deps.redis.setex(
         snapKey,
-        TTL_SECONDS.snapshot,
+        ttls.snapshot,
         JSON.stringify(snapshot),
       );
 
