@@ -32,7 +32,7 @@
  */
 
 import type { Conductor } from "@claustrum/core";
-import { DEFAULT_CHECKS } from "./checks.js";
+import { DEFAULT_CHECKS } from "./default-checks.js";
 import type {
   ConformanceCheck,
   ConformanceOptions,
