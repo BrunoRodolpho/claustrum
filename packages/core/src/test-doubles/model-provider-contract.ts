@@ -60,9 +60,13 @@ export function runModelProviderContract(options: ContractOptions): void {
         seen.push(chunk.type);
         if (chunk.type === "done" || chunk.type === "cancelled") break;
       }
-      expect(seen).toContain(
-        seen.indexOf("done") >= 0 ? "done" : "cancelled",
-      );
+      // Assert the stream terminates with EXACTLY ONE terminal marker that
+      // is either "done" or "cancelled".  Two sub-checks:
+      //   (1) Exactly one terminal appears in the collected chunks.
+      //   (2) That terminal is the last element (stream stopped at it).
+      const terminals = seen.filter((t) => t === "done" || t === "cancelled");
+      expect(terminals.length).toBe(1);
+      expect(seen[seen.length - 1]).toBe(terminals[0]);
     });
 
     it("stream() cancel() is idempotent and observable", async () => {
