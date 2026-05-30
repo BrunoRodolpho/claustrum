@@ -115,6 +115,32 @@ export interface AnthropicMessageStream extends AsyncIterable<AnthropicStreamEve
   finalMessage(): Promise<AnthropicMessageResponse>;
 }
 
+// ── SDK wrapper helper ─────────────────────────────────────────────────────
+
+/**
+ * Wraps a real `@anthropic-ai/sdk` `Anthropic` instance so it satisfies
+ * `AnthropicClientLike` without any cast in user code.
+ *
+ * The SDK narrows the `stream` field in its overloaded `create()` signature
+ * (which differs from this adapter's broader `boolean | undefined` body type),
+ * causing TypeScript to reject a direct assignment.  This helper centralises
+ * the one `unknown` coercion here so adopters can write:
+ *
+ * ```ts
+ * import Anthropic from "@anthropic-ai/sdk";
+ * import { wrapAnthropicSdk, AnthropicProvider } from "@claustrum/anthropic";
+ *
+ * const client = wrapAnthropicSdk(new Anthropic({ apiKey }));
+ * const provider = new AnthropicProvider({ client });
+ * ```
+ *
+ * @param sdk - Any object whose structural shape satisfies the SDK surface
+ *   we consume (real SDK or a compatible fake).
+ */
+export function wrapAnthropicSdk(sdk: unknown): AnthropicClientLike {
+  return sdk as AnthropicClientLike;
+}
+
 // ── Options ────────────────────────────────────────────────────────────────
 
 export interface AnthropicProviderOptions {

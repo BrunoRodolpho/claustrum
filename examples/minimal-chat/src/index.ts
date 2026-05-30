@@ -16,7 +16,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { buildEnvelope, type IntentEnvelope } from "@adjudicate/core";
-import { AnthropicProvider, type AnthropicClientLike } from "@claustrum/anthropic";
+import { AnthropicProvider, wrapAnthropicSdk } from "@claustrum/anthropic";
 import {
   createConductor,
   createToolRegistry,
@@ -63,11 +63,7 @@ const CalendarInputSchema = z.object({
 function makeModelProvider(): ModelProvider {
   const apiKey = process.env["ANTHROPIC_API_KEY"];
   if (apiKey !== undefined && apiKey.length > 0) {
-    // The SDK's stronger types are structurally compatible with the
-    // adapter's `AnthropicClientLike` surface; cast through `unknown`
-    // because the SDK narrows `stream: false` while the adapter accepts
-    // the broader `boolean | undefined`.
-    const client = new Anthropic({ apiKey }) as unknown as AnthropicClientLike;
+    const client = wrapAnthropicSdk(new Anthropic({ apiKey }));
     return new AnthropicProvider({ client });
   }
   // Hermetic fallback so `pnpm build` works without a key.
