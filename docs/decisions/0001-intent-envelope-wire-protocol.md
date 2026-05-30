@@ -1,12 +1,12 @@
 # ADR-001: `IntentEnvelope` as the runtime ↔ kernel wire protocol
 
-- **Status:** Proposed
+- **Status:** Draft
 - **Date:** 2026-05-26
 - **Deciders:** Bruno Rodolpho, claustrum core team
 - **Consulted:** @adjudicate/core maintainers
 - **References:**
-  - `/Users/thaisrodolpho/projects/adjudicate/packages/core/src/audit.ts` (canonical TS types: `IntentEnvelope`, `Decision`, `AuditRecord`)
-  - `/Users/thaisrodolpho/projects/adjudicate/packages/core/src/basis-codes.ts` (basis-code vocabulary)
+  - `packages/core/src/audit.ts` in `@adjudicate/core` (canonical TS types: `IntentEnvelope`, `Decision`, `AuditRecord`)
+  - `packages/core/src/basis-codes.ts` in `@adjudicate/core` (basis-code vocabulary)
   - PART I §"The Adjudicator port" of master plan
   - ADR-005 (Runtime/Kernel Layer Split) — the architectural declaration this ADR realises
 
@@ -32,7 +32,7 @@ We treat `IntentEnvelope` as a **versioned wire protocol with protobuf-style add
 
 4. **`intentHash` derivation is canonical and stable.** Hash inputs in canonical-JSON ordering: `(version, kind, payload, nonce, actor, taint)`. `createdAt` is explicitly excluded so retries with identical nonce produce identical hashes regardless of wall-clock. `intentHash` itself is excluded from its own hash input (self-reference). This is the existing `sha256Canonical` behavior in adjudicate's `envelope.ts` — claustrum inherits it as the cross-language contract.
 
-5. **JSON Schema generation.** `@claustrum/core` ships `schemas/intent-envelope.v2.json` generated from the TS type. Non-TS consumers (future Python/Rust adapters) validate against the JSON Schema, not the TS file.
+5. **JSON Schema generation.** `@claustrum/core` will ship a `schemas/intent-envelope.v2.json` (forthcoming; not yet generated) derived from the TS type. Non-TS consumers (future Python/Rust adapters) will validate against the JSON Schema, not the TS file.
 
 6. **Peer-dep pin on `@adjudicate/core` by major version.** `@claustrum/core` declares `@adjudicate/core` as a peerDependency pinned to `^1.0.0` (or whatever majors envelope v2 is stable in). Bumping `@adjudicate/core` to a major that ships envelope v3 requires a coordinated `@claustrum/core` major bump.
 

@@ -5,7 +5,7 @@
 | Need | Go to |
 |------|-------|
 | Long-form architecture (runtime ⇄ kernel split) | [docs/architecture/design/runtime-kernel-layer-split.md](./docs/architecture/design/runtime-kernel-layer-split.md) |
-| Cognitive-loop spec (`handleTurn`) | [docs/architecture/design/cognitive-loop.md](./docs/architecture/design/cognitive-loop.md) |
+| Cognitive-loop spec (`handleTurn`) | [`packages/core/src/handle-turn.ts`](./packages/core/src/handle-turn.ts) |
 | Hybrid state-flow / XState pattern | [docs/architecture/design/hybrid-state-flow.md](./docs/architecture/design/hybrid-state-flow.md) |
 | Tool classification (READ_ONLY vs MUTATING) | [docs/architecture/design/tool-classification.md](./docs/architecture/design/tool-classification.md) |
 | ADRs | [docs/decisions/](./docs/decisions/) |

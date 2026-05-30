@@ -15,7 +15,7 @@
 `@ibatexas/pack-whatsapp` (the WhatsApp business-policy Pack) declares an
 `WhatsAppState` whose `ctx.lastCustomerMessageAt` field drives the
 Twilio-mandated **24-hour customer-initiated window** guard. Per
-[`packages/pack-whatsapp/src/policies.ts:106-129`](../../../packages/pack-whatsapp/src/policies.ts):
+`packages/pack-whatsapp/src/policies.ts:106-129` (cross-repo: `@adjudicate/pack-whatsapp`):
 
 ```
 const requireWindowOpen: WhatsAppGuard = (envelope, state) => {
@@ -43,7 +43,7 @@ Post-H2 we now have the wrapper-meta and `auditSink` boot-time DI
 contract settled (`@ibatexas/audit-sink` leaf, `654d337`). The
 state-builder is the next-mile chokepoint helper that, together with
 `buildSystemEnvelope()` (already-shipped at
-[`apps/api/src/subscribers/__shared__/system-actor-envelope.ts`](../../../apps/api/src/subscribers/__shared__/system-actor-envelope.ts)),
+`apps/api/src/subscribers/__shared__/system-actor-envelope.ts` (cross-repo: ibatexas)),
 lets ~7-9 deferred subscriber/job egress paths flip onto the kernel-gated
 `whatsapp.message.send` path.
 
@@ -54,19 +54,19 @@ test fixtures + rollout sequencing required to land it.
 
 ## Deferred sites inventory (9 sites)
 
-Enumerated via `grep -rn "sendText\|sendMedia" apps/api/src apps/api/src/jobs apps/api/src/subscribers` + cross-reference with [`docs/adjudicate-migration/open-blockers.md`](../../adjudicate-migration/open-blockers.md) §"Out-of-scope from task 16". Excludes the inbound `whatsapp-webhook.ts` egress (that's the LLM agent reply, fundamentally different — it's always inside the 24h window by definition because the customer just messaged in).
+Enumerated via `grep -rn "sendText\|sendMedia" apps/api/src apps/api/src/jobs apps/api/src/subscribers` + cross-reference with `docs/adjudicate-migration/open-blockers.md` §"Out-of-scope from task 16" (cross-repo: `BrunoRodolpho/ibatexas`). Excludes the inbound `whatsapp-webhook.ts` egress (that's the LLM agent reply, fundamentally different — it's always inside the 24h window by definition because the customer just messaged in).
 
 | # | Site | File:line | Envelope it would build | What state it needs | Behaviour gated today |
 |---|---|---|---|---|---|
-| 1 | `notification.send` subscriber (cart-intelligence) | [`apps/api/src/subscribers/cart-intelligence.ts:822-873`](../../../apps/api/src/subscribers/cart-intelligence.ts) | `whatsapp.message.send` (SYSTEM, customer recipient) | `lastCustomerMessageAt` for the customer's WhatsApp identity (E.164 phone → projection) | Delivers WhatsApp notifications (cart abandoned tier 1/2/3, order placed, status changes, dispute alerts, review prompts) **without** firing the 24h-window guard. Silent delivery failure (Twilio rejects out-of-window non-templated sends) is the production failure mode today. |
-| 2 | `handoff-subscriber` | [`apps/api/src/subscribers/handoff-subscriber.ts:14-61`](../../../apps/api/src/subscribers/handoff-subscriber.ts) | `whatsapp.message.send` (SYSTEM, staff recipient) | `lastCustomerMessageAt` for the **customer's** phone (per `WhatsAppState.ctx.lastCustomerMessageAt` semantics — the customer-initiated window is what matters; the staff recipient is just the egress target). Plus `perCustomerHandoffCount` for rate-limit. | Sends customer→staff handoff alert when the LLM requests human review. Bypasses both the 24h-window guard AND the per-customer handoff rate-limit (3rd+ in 10min should REFUSE; today no rate-limit fires). |
-| 3 | `cart.abandoned` tier-escalation (cart-intelligence handler) | [`apps/api/src/subscribers/cart-intelligence.ts:124-254`](../../../apps/api/src/subscribers/cart-intelligence.ts) | `whatsapp.message.send` (SYSTEM) via `notification.send` relay — see #1 | `lastCustomerMessageAt` | The cart-abandoned tier escalator publishes `notification.send` events at tier 1 (4h), tier 2 (4h+18h), tier 3 (4h+18h+24h). Each fan-out is currently un-governed. Tier-3 messages are by definition fired ≥ 46h after the last customer message — these ARE outside the 24h window and would be REFUSEd by the state-builder; this is the **correct** behaviour. Today the silent-Twilio-reject is the failure mode. |
-| 4 | `review.prompt` subscriber (cart-intelligence) | [`apps/api/src/subscribers/cart-intelligence.ts:938-980`](../../../apps/api/src/subscribers/cart-intelligence.ts) | `whatsapp.message.send` (SYSTEM) | `lastCustomerMessageAt` | Sends a review-request WhatsApp message 30min after delivery. The customer received the order (so they're warm) but they may not have *messaged* in 24h. Same silent-Twilio-reject hazard. |
-| 5 | `proactive-engagement` job | [`apps/api/src/jobs/proactive-engagement.ts:138`](../../../apps/api/src/jobs/proactive-engagement.ts) | `whatsapp.template.send` (SYSTEM) preferred — proactive outreach to dormant (≥7d inactive) customers is by-definition **outside** the 24h window | (For free-form) `lastCustomerMessageAt`. (For template path) only the SYSTEM taint check applies. | Sends outreach to dormant customers. These ARE the customers most likely to be outside the 24h window; the template-send path is the correct destination. The state-builder still needs to project `lastCustomerMessageAt` so the policy can choose between `message.send` REFUSE vs. `template.send` admit. |
-| 6 | `hesitation-nudge` job | [`apps/api/src/jobs/hesitation-nudge.ts:52`](../../../apps/api/src/jobs/hesitation-nudge.ts) | `whatsapp.message.send` (SYSTEM) | `lastCustomerMessageAt` (should be < 45s old by construction — fires after first-contact debounce) | Sends a reinforcement nudge 45s after first contact. By construction inside the 24h window, but the policy needs the projection to confirm rather than assume. |
-| 7 | `pix-expiry-monitor` job | [`apps/api/src/jobs/pix-expiry-monitor.ts:55,72,77`](../../../apps/api/src/jobs/pix-expiry-monitor.ts) | `whatsapp.message.send` (SYSTEM) | `lastCustomerMessageAt` (the customer just placed a PIX order — by construction inside the window) | Sends PIX reminder (25min) and expiry (30min) messages. The customer placed the order minutes ago so they're well inside the window, but the policy needs the projection. |
-| 8 | `reservation-reminder` job | [`apps/api/src/jobs/reservation-reminder.ts:71`](../../../apps/api/src/jobs/reservation-reminder.ts) (via `sendReservationReminder` in [`packages/tools/src/reservation/notifications.ts:154`](../../../packages/tools/src/reservation/notifications.ts)) | `whatsapp.message.send` or `whatsapp.template.send` (SYSTEM) | `lastCustomerMessageAt` to choose path | Sends day-of reservation reminders. Customer made the reservation through some channel (web, WhatsApp, walk-in); may or may not be inside the 24h window. **Most likely outside**, so `template.send` is the right destination — and the state-builder is needed to make the policy choose. |
-| 9 | `cart-recovery-messages` job-helper paths (called from #1 via `notification.send`) | [`apps/api/src/jobs/cart-recovery-messages.ts`](../../../apps/api/src/jobs/cart-recovery-messages.ts) | Same as #1 — relayed through `notification.send` | Same as #1 | Builds the per-tier recovery message body. Inherits #1's gating. |
+| 1 | `notification.send` subscriber (cart-intelligence) | `apps/api/src/subscribers/cart-intelligence.ts:822-873` (cross-repo: ibatexas) | `whatsapp.message.send` (SYSTEM, customer recipient) | `lastCustomerMessageAt` for the customer's WhatsApp identity (E.164 phone → projection) | Delivers WhatsApp notifications (cart abandoned tier 1/2/3, order placed, status changes, dispute alerts, review prompts) **without** firing the 24h-window guard. Silent delivery failure (Twilio rejects out-of-window non-templated sends) is the production failure mode today. |
+| 2 | `handoff-subscriber` | `apps/api/src/subscribers/handoff-subscriber.ts:14-61` (cross-repo: ibatexas) | `whatsapp.message.send` (SYSTEM, staff recipient) | `lastCustomerMessageAt` for the **customer's** phone (per `WhatsAppState.ctx.lastCustomerMessageAt` semantics — the customer-initiated window is what matters; the staff recipient is just the egress target). Plus `perCustomerHandoffCount` for rate-limit. | Sends customer→staff handoff alert when the LLM requests human review. Bypasses both the 24h-window guard AND the per-customer handoff rate-limit (3rd+ in 10min should REFUSE; today no rate-limit fires). |
+| 3 | `cart.abandoned` tier-escalation (cart-intelligence handler) | `apps/api/src/subscribers/cart-intelligence.ts:124-254` (cross-repo: ibatexas) | `whatsapp.message.send` (SYSTEM) via `notification.send` relay — see #1 | `lastCustomerMessageAt` | The cart-abandoned tier escalator publishes `notification.send` events at tier 1 (4h), tier 2 (4h+18h), tier 3 (4h+18h+24h). Each fan-out is currently un-governed. Tier-3 messages are by definition fired ≥ 46h after the last customer message — these ARE outside the 24h window and would be REFUSEd by the state-builder; this is the **correct** behaviour. Today the silent-Twilio-reject is the failure mode. |
+| 4 | `review.prompt` subscriber (cart-intelligence) | `apps/api/src/subscribers/cart-intelligence.ts:938-980` (cross-repo: ibatexas) | `whatsapp.message.send` (SYSTEM) | `lastCustomerMessageAt` | Sends a review-request WhatsApp message 30min after delivery. The customer received the order (so they're warm) but they may not have *messaged* in 24h. Same silent-Twilio-reject hazard. |
+| 5 | `proactive-engagement` job | `apps/api/src/jobs/proactive-engagement.ts:138` (cross-repo: ibatexas) | `whatsapp.template.send` (SYSTEM) preferred — proactive outreach to dormant (≥7d inactive) customers is by-definition **outside** the 24h window | (For free-form) `lastCustomerMessageAt`. (For template path) only the SYSTEM taint check applies. | Sends outreach to dormant customers. These ARE the customers most likely to be outside the 24h window; the template-send path is the correct destination. The state-builder still needs to project `lastCustomerMessageAt` so the policy can choose between `message.send` REFUSE vs. `template.send` admit. |
+| 6 | `hesitation-nudge` job | `apps/api/src/jobs/hesitation-nudge.ts:52` (cross-repo: ibatexas) | `whatsapp.message.send` (SYSTEM) | `lastCustomerMessageAt` (should be < 45s old by construction — fires after first-contact debounce) | Sends a reinforcement nudge 45s after first contact. By construction inside the 24h window, but the policy needs the projection to confirm rather than assume. |
+| 7 | `pix-expiry-monitor` job | `apps/api/src/jobs/pix-expiry-monitor.ts:55,72,77` (cross-repo: ibatexas) | `whatsapp.message.send` (SYSTEM) | `lastCustomerMessageAt` (the customer just placed a PIX order — by construction inside the window) | Sends PIX reminder (25min) and expiry (30min) messages. The customer placed the order minutes ago so they're well inside the window, but the policy needs the projection. |
+| 8 | `reservation-reminder` job | `apps/api/src/jobs/reservation-reminder.ts:71` (cross-repo: ibatexas) (via `sendReservationReminder` in `packages/tools/src/reservation/notifications.ts:154`) | `whatsapp.message.send` or `whatsapp.template.send` (SYSTEM) | `lastCustomerMessageAt` to choose path | Sends day-of reservation reminders. Customer made the reservation through some channel (web, WhatsApp, walk-in); may or may not be inside the 24h window. **Most likely outside**, so `template.send` is the right destination — and the state-builder is needed to make the policy choose. |
+| 9 | `cart-recovery-messages` job-helper paths (called from #1 via `notification.send`) | `apps/api/src/jobs/cart-recovery-messages.ts` (cross-repo: ibatexas) | Same as #1 — relayed through `notification.send` | Same as #1 | Builds the per-tier recovery message body. Inherits #1's gating. |
 
 **Total: 9 deferred sites** (the original brief said "~7+"; we found 9, comfortably within the "<15 = no scope explosion" hard-stop in the brief).
 
@@ -81,7 +81,7 @@ Enumerated via `grep -rn "sendText\|sendMedia" apps/api/src apps/api/src/jobs ap
 
 ### XState machine (LLM-agent state) — NOT involved
 
-[`docs/architecture/design/hybrid-state-flow.md`](./hybrid-state-flow.md) describes the 10-layer pipeline driving the LLM agent. The XState machine's snapshot (`wa:machine:{sessionId}` per [`docs/ops/redis-memory.md:27`](../../ops/redis-memory.md)) tracks per-turn conversation flow (cart state, checkout step, last tool call). It does NOT track inbound-message timestamps as a first-class concept — the customer's last inbound IS the implicit anchor for "agent should run", but no field is exposed for downstream consumers.
+[`docs/architecture/design/hybrid-state-flow.md`](./hybrid-state-flow.md) describes the 10-layer pipeline driving the LLM agent. The XState machine's snapshot (`wa:machine:{sessionId}` per `docs/ops/redis-memory.md:27` (cross-repo: ibatexas)) tracks per-turn conversation flow (cart state, checkout step, last tool call). It does NOT track inbound-message timestamps as a first-class concept — the customer's last inbound IS the implicit anchor for "agent should run", but no field is exposed for downstream consumers.
 
 The state-builder is OUT-of-band w.r.t. the XState machine. It serves the Pack-policy layer (which decides whether to ADMIT or REFUSE outbound Twilio sends), not the conversation-flow layer.
 
@@ -89,19 +89,19 @@ The state-builder is OUT-of-band w.r.t. the XState machine. It serves the Pack-p
 
 Three places already know "when did this customer last message us":
 
-1. **Redis hash** `wa:phone:{phoneHash}.lastMessageAt` ([`apps/api/src/whatsapp/session.ts:96,196,228`](../../../apps/api/src/whatsapp/session.ts)) — set on every WhatsApp webhook hit via `touchSession()`. Cleared after 24h via the hash's TTL. **Stores a millisecond epoch as string.** Closest existing projection but: (a) keyed by `phoneHash` not `customerId`, (b) includes outbound-agent activity too (the session rotates after 30min idle regardless of direction), and (c) the TTL is the same as the policy window — so reading "was there a customer message within the last 24h" via `EXISTS` is degenerate with reading the TTL.
+1. **Redis hash** `wa:phone:{phoneHash}.lastMessageAt` (`apps/api/src/whatsapp/session.ts:96,196,228` (cross-repo: ibatexas)) — set on every WhatsApp webhook hit via `touchSession()`. Cleared after 24h via the hash's TTL. **Stores a millisecond epoch as string.** Closest existing projection but: (a) keyed by `phoneHash` not `customerId`, (b) includes outbound-agent activity too (the session rotates after 30min idle regardless of direction), and (c) the TTL is the same as the policy window — so reading "was there a customer message within the last 24h" via `EXISTS` is degenerate with reading the TTL.
 
-2. **Redis list** `session:{sessionId}` ([`apps/api/src/session/store.ts:14-22`](../../../apps/api/src/session/store.ts)) — JSON-encoded `AgentMessage[]` ordered list, last 50 messages, 24h (auth)/48h (guest) TTL. Each message has `role: "user" | "assistant" | "system"`. The latest `role: "user"` entry's timestamp would be `lastCustomerMessageAt` — but the structure embeds no per-message timestamp by default (only the implicit `Date.now()` at insertion). The CDC publish path attaches `sentAt: new Date().toISOString()` to each message at archival ([`store.ts:69`](../../../apps/api/src/session/store.ts)). Reading this back to compute `lastCustomerMessageAt` requires LRANGE + JSON.parse + reverse-scan for the latest `role: "user"`.
+2. **Redis list** `session:{sessionId}` (`apps/api/src/session/store.ts:14-22` (cross-repo: ibatexas)) — JSON-encoded `AgentMessage[]` ordered list, last 50 messages, 24h (auth)/48h (guest) TTL. Each message has `role: "user" | "assistant" | "system"`. The latest `role: "user"` entry's timestamp would be `lastCustomerMessageAt` — but the structure embeds no per-message timestamp by default (only the implicit `Date.now()` at insertion). The CDC publish path attaches `sentAt: new Date().toISOString()` to each message at archival (`store.ts:69` (cross-repo: ibatexas)). Reading this back to compute `lastCustomerMessageAt` requires LRANGE + JSON.parse + reverse-scan for the latest `role: "user"`.
 
-3. **Postgres** `ibx_domain.conversation_messages` ([`packages/domain/prisma/schema.prisma:555-569`](../../../packages/domain/prisma/schema.prisma)) — the durable archive. One row per message with `role: MessageRole`, `sentAt: DateTime`, `conversationId` (FK to `Conversation.sessionId`). Already indexed on `(conversationId, sentAt)`. **This is the only source of truth that survives Redis eviction** and supports queries beyond 24h.
+3. **Postgres** `ibx_domain.conversation_messages` (`packages/domain/prisma/schema.prisma:555-569` (cross-repo: ibatexas)) — the durable archive. One row per message with `role: MessageRole`, `sentAt: DateTime`, `conversationId` (FK to `Conversation.sessionId`). Already indexed on `(conversationId, sentAt)`. **This is the only source of truth that survives Redis eviction** and supports queries beyond 24h.
 
 ### Inbound-write path (where the projection write would hook)
 
-The single inbound-message ingestion path is [`apps/api/src/routes/whatsapp-webhook.ts`](../../../apps/api/src/routes/whatsapp-webhook.ts). It already:
+The single inbound-message ingestion path is `apps/api/src/routes/whatsapp-webhook.ts` (cross-repo: ibatexas). It already:
 
 - calls `touchSession(hash)` at line 412 (updates `wa:phone:*.lastMessageAt`)
 - calls `appendMessages(session.sessionId, [{ role: "user", content }], ...)` at lines 86, 400, 437, 517 — these append to Redis AND fan out a `conversation.message.appended` NATS event at line 62 of `store.ts`
-- the [`conversation-archiver.ts` subscriber](../../../apps/api/src/subscribers/conversation-archiver.ts) consumes `conversation.message.appended` and writes to Postgres `conversation_messages`
+- the `conversation-archiver.ts` subscriber (cross-repo: ibatexas) consumes `conversation.message.appended` and writes to Postgres `conversation_messages`
 
 So **for any inbound customer message, three writes already happen synchronously / via CDC**. The state-builder design choice is which of those three reads (or a fourth new write) to canonicalise.
 
@@ -121,7 +121,7 @@ A new Redis string per customer:
 
 - **Key:** `wa:last_customer_msg:{phoneHash}` (joining on `phoneHash` keeps the projection independent of `customerId` resolution; `phoneHash` is what the inbound webhook has immediately, and `WhatsAppState` already keys other fields on `phoneHash`).
 - **Value:** millisecond epoch as string (matches existing `wa:phone:*.lastMessageAt` convention).
-- **TTL:** 25h (24h policy window + 1h buffer to give the state-builder grace on the policy's `WHATSAPP_24H_WINDOW_GRACE_SECONDS` overshoot). After TTL expiry the key vanishes and the projection returns `null`, which the Pack interprets as "no prior customer message" → REFUSE (the **conservative** default per [`policies.ts:113`](../../../packages/pack-whatsapp/src/policies.ts)).
+- **TTL:** 25h (24h policy window + 1h buffer to give the state-builder grace on the policy's `WHATSAPP_24H_WINDOW_GRACE_SECONDS` overshoot). After TTL expiry the key vanishes and the projection returns `null`, which the Pack interprets as "no prior customer message" → REFUSE (the **conservative** default per `packages/pack-whatsapp/src/policies.ts:113` (cross-repo: `@adjudicate/pack-whatsapp`)).
 
 ### Write path
 
@@ -252,7 +252,7 @@ conversation.message.appended event
         WHERE customers.id = (lookup by sessionId → conversationId → customerId)
 ```
 
-This is **envelope-governed** because `conversation.message.append` is already kernel-gated (`packages/domain/src/services/__shared__/conversation-policy.ts`). The state-builder's WRITE side is implicit — it's a side-effect of an already-governed envelope.
+This is **envelope-governed** because `conversation.message.append` is already kernel-gated (`packages/domain/src/services/__shared__/conversation-policy.ts` (cross-repo: ibatexas)). The state-builder's WRITE side is implicit — it's a side-effect of an already-governed envelope.
 
 ### Read path
 
@@ -291,7 +291,7 @@ Note: `perCustomerHandoffCount` STAYS Redis-backed in alt B too — it's a rolli
 
 Postgres unreachable → Prisma throws → state-builder propagates → adopter fails closed. Same posture as alt A.
 
-The kernel's audit-postgres preflight ([`kernel-bootstrap.ts:230`](../../../apps/api/src/plugins/kernel-bootstrap.ts)) already enforces that Postgres must be up for boot to succeed, so a runtime Postgres outage is the same severity event as an audit outage — the always-on posture already covers it.
+The kernel's audit-postgres preflight (`apps/api/src/plugins/kernel-bootstrap.ts:230` (cross-repo: ibatexas)) already enforces that Postgres must be up for boot to succeed, so a runtime Postgres outage is the same severity event as an audit outage — the always-on posture already covers it.
 
 ### Replay implications — **CLEAN**
 

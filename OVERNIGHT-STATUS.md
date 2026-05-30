@@ -11,7 +11,7 @@
 
 You have a **complete, building, tested `@claustrum/*` monorepo** at `/Users/thaisrodolpho/projects/claustrum/` and a **branch-only ibatexas integration** at `feat/claustrum-cutover`. Both are local-only — nothing pushed, nothing published, no destructive operations performed.
 
-**Total deliverable:** 9 packages, 2 example apps, 174 tests passing, 11 commits in claustrum + 2 commits in ibatexas branch.
+**Total deliverable:** 10 packages, 2 example apps, 174 tests passing, 11 commits in claustrum + 2 commits in ibatexas branch.
 
 **Six things you need to do** (the friction list — your authority is required):
 
@@ -26,7 +26,7 @@ You have a **complete, building, tested `@claustrum/*` monorepo** at `/Users/tha
 
 ## What was built (claustrum)
 
-### 9 packages (all building, all tested)
+### 10 packages (all building, all tested)
 
 | Package | Tests | Commit |
 |---|---:|---|
@@ -127,7 +127,7 @@ You (or a linter) edited `ibatexas/docs/architecture/decisions.md` and `ibatexas
 **Workspace totals**
 - 11 commits in claustrum (clean linear history; conventional-commit style)
 - 2 commits on `feat/claustrum-cutover` branch in ibatexas
-- 9 packages building clean
+- 10 packages building clean
 - 174 tests passing across the workspace
 - 0 ESLint errors
 - 0 TypeScript errors (claustrum side)
