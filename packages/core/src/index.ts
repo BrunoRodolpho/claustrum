@@ -19,6 +19,13 @@ export { handleTurn, type TurnResult } from "./handle-turn.js";
 // ── Dispatch ───────────────────────────────────────────────────────────────
 export { dispatchDecision, type DispatchResult } from "./execution/dispatch.js";
 
+// ── Retry / backoff (consumes CompletionError.retryAfterMs) ─────────────────
+export {
+  retryWithBackoff,
+  computeRetryDelayMs,
+  type RetryOptions,
+} from "./execution/retry.js";
+
 // ── Ports ──────────────────────────────────────────────────────────────────
 export type {
   ModelProvider,
