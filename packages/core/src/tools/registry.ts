@@ -87,6 +87,26 @@ export function createToolRegistry(
     Array<ToolDefinition<unknown, unknown>>
   >();
 
+  /**
+   * Cached ctx-INDEPENDENT base projection of every registered tool
+   * (insertion-ordered — `ToolDefinition` carries no priority axis, so
+   * `byId.values()` order is the projection). `Array.from(byId.values())`
+   * is otherwise re-materialised on every `resolveCapabilities` /  `list`
+   * call (PerformanceReviewer-002).
+   *
+   * INVARIANT — this caches ONLY the ctx-independent base. The per-ctx
+   * `visibility(base, ctx)` filter + capability de-dupe still run FRESH on
+   * every `resolveCapabilities` call; the ctx-filtered result is NEVER
+   * cached. Invalidated (set to `undefined`) on every `byId` mutation.
+   */
+  let baseProjection:
+    | ReadonlyArray<ToolDefinition<unknown, unknown>>
+    | undefined;
+
+  function base(): ReadonlyArray<ToolDefinition<unknown, unknown>> {
+    return (baseProjection ??= Array.from(byId.values()));
+  }
+
   const visibility =
     options.visibility ??
     ((tools) => tools);
@@ -119,13 +139,18 @@ export function createToolRegistry(
     register<I, O>(tool: ToolDefinition<I, O>): void {
       const erased = tool as unknown as ToolDefinition<unknown, unknown>;
       byId.set(erased.id, erased);
+      // `byId` mutated -> the cached base projection is stale. Invalidate so
+      // the next read (resolveCapabilities / list) recomputes it.
+      baseProjection = undefined;
       const list = byCapability.get(erased.capability) ?? [];
       list.push(erased);
       byCapability.set(erased.capability, list);
     },
 
     resolveCapabilities(ctx: unknown): ReadonlyArray<CapabilityDescriptor> {
-      const visible = visibility(Array.from(byId.values()), ctx);
+      // Filter the cached ctx-independent base FRESH per ctx — the filtered
+      // result is intentionally never cached (different ctx -> different set).
+      const visible = visibility(base(), ctx);
       // De-dupe by capability — surface one descriptor per capability.
       const seen = new Set<CapabilityId>();
       const out: CapabilityDescriptor[] = [];
@@ -158,7 +183,9 @@ export function createToolRegistry(
     },
 
     list(): ReadonlyArray<ToolDefinition<unknown, unknown>> {
-      return Array.from(byId.values());
+      // Same ctx-independent projection as resolveCapabilities' base — reuse
+      // the cache rather than re-materialise the array.
+      return base();
     },
   };
 }
