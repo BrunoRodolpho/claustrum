@@ -5,6 +5,14 @@
 > shape will not change without a major version bump.
 >
 > A port marked **DRAFT** is still in flux and adapters must wait.
+>
+> **Authoritative source:** the roster below is derived from and must match the
+> `export type { … }` statements under the `// ── Ports ──` section of
+> `packages/core/src/index.ts`. When in doubt, index.ts wins.
+>
+> **`ToolRegistry`** (`packages/core/src/tools/registry.ts`) is tool
+> infrastructure, not a port interface — it is NOT one of the 13 frozen ports
+> and does NOT appear in this roster.
 
 | # | Port | File | Status |
 |---|---|---|---|

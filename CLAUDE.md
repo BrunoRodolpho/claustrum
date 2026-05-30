@@ -28,20 +28,20 @@
 
 3. **The cognitive loop is invariant.** `perceive → understand → plan → submit → act → synthesize → observe`. `adjudicate()` is called **exactly once per turn** (or `adjudicatePlan()` for multi-step). The runtime never mutates state without a positive Decision. Every `Decision` variant has a defined handler — `EXECUTE`, `REFUSE`, `DEFER`, `ESCALATE`, `REQUEST_CONFIRMATION`, `REWRITE` — no throws.
 
-4. **The 13 ports are conceptual boundaries, not just types.** Every adapter package implements one or more ports:
+4. **The 13 ports are conceptual boundaries, not just types.** Every adapter package implements one or more ports. Authoritative names are the exported types in `packages/core/src/index.ts` (`// ── Ports ──` section):
    - `ModelProvider` — LLM completion + streaming + embedding
-   - `MemoryProvider` — episodic/semantic recall; `recentActions()` reads kernel ledger via `Adjudicator.replayEnvelopesByCustomerId` (NEVER raw SQL into `intent_audit`)
-   - `GroundingProvider` — RAG + grounding-proof generation
+   - `MemoryPort` — episodic/semantic recall; `recentActions()` reads kernel ledger via `Adjudicator.replayEnvelopesByCustomerId` (NEVER raw SQL into `intent_audit`)
+   - `GroundingPort` — RAG + grounding-proof generation
    - `ChannelDriver` — `perceive`/`render`/`attest`; long-lived session resumption via `matchToParked(channelEvent, session)`
-   - `ToolPack` — domain tools exposed by capability
-   - `FewShotProvider` — indexed retrieval of conversation exemplars; gold outcomes include expected `Decision`
-   - `SessionStore` — persist `Session` across turns, including parked envelopes
-   - `TelemetrySink` — `emitTurn`, `emitLLMTrace`, `emitMemoryAccess`; LLM-trace storage is **separate retention** from the audit ledger
+   - `FewShotIndex` — indexed retrieval of conversation exemplars; gold outcomes include expected `Decision`
+   - `SessionPort` — persist `Session` across turns, including parked envelopes
+   - `TelemetryPort` — `emitTurn`, `emitLLMTrace`, `emitMemoryAccess`; LLM-trace storage is **separate retention** from the audit ledger
    - `PlannerPort` — proposes `IntentEnvelope[]` from `CognitiveState`
    - `ResponderPort` — generates user-facing response
    - `ExplainerPort` — renders refusal text via explain templates
    - `HandoffPort` — human escalation queue
    - `Adjudicator` — the only kernel-facing port
+   - `TenantResolver` — bridge between an inbound channel event and per-turn `(SystemState, PolicyBundle)`
 
    No adapter depends on another. All depend on `@claustrum/core` for the port type only.
 
