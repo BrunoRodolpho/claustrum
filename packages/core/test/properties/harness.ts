@@ -142,9 +142,16 @@ export function buildInbound(text: string): ChannelMessage {
     customerId: "cust-test",
     conversationId: "conv-test",
     text,
-    receivedAt: new Date().toISOString(),
+    // Fixed timestamp — using wall-clock here makes property-test failures
+    // non-reproducible.  All property tests use this stable value.
+    receivedAt: "2026-05-18T00:00:00.000Z",
   };
 }
+
+// Monotonic counter used to generate deterministic nonces for envelopes
+// built by `buildTestEnvelope` when the caller does not supply one.
+// Using Math.random() here makes property-test failures non-reproducible.
+let _envelopeCounter = 0;
 
 export function buildTestEnvelope(input: {
   readonly kind: string;
@@ -160,7 +167,7 @@ export function buildTestEnvelope(input: {
       sessionId: "session-prop",
     },
     taint: "TRUSTED",
-    nonce: input.nonce ?? `nonce-${Math.random().toString(36).slice(2)}`,
+    nonce: input.nonce ?? `nonce-${input.kind}-${++_envelopeCounter}`,
   });
 }
 
