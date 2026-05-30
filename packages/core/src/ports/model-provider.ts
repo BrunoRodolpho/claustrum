@@ -81,7 +81,18 @@ export type CompletionChunk =
       readonly inputTokens: number;
       readonly outputTokens: number;
     }
-  | { readonly type: "cancelled" };
+  | {
+      readonly type: "cancelled";
+      /**
+       * Running token counts accumulated before the stream was aborted.
+       * Present when the adapter has partial usage figures at cancel time;
+       * absent (or zero) when cancelled before any usage data is available.
+       * Callers use these for billing/observability so invisible spend is
+       * visible even on aborted streams (NetworkReviewer-006).
+       */
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+    };
 
 /**
  * Cancellable async iterable. Yielded by `ModelProvider.stream()`.
