@@ -31,6 +31,19 @@ export interface ToolRegistry {
   resolveCapabilities(ctx: unknown): ReadonlyArray<CapabilityDescriptor>;
 
   /**
+   * Membership check: is at least one tool registered under this capability?
+   *
+   * Context-independent — it asks only "does this capability exist in the
+   * catalog at all", NOT "is it visible/resolvable in the current ctx"
+   * (that is {@link resolveTool}'s job). Used to validate an untrusted
+   * `IntentEnvelope.kind` before branding it as a {@link CapabilityId}, so a
+   * blind cast never mints a brand for a kind the registry has never heard of
+   * (TypeReviewer-004). Visibility/tenant filtering still applies at
+   * `resolveTool` time and can legitimately reject a capability that exists.
+   */
+  hasCapability(capability: string): boolean;
+
+  /**
    * Resolve a capability + context to a concrete tool.
    * Throws when no matching tool is registered for the capability.
    */
@@ -122,6 +135,11 @@ export function createToolRegistry(
         out.push(descriptorOf(tool));
       }
       return out;
+    },
+
+    hasCapability(capability: string): boolean {
+      const candidates = byCapability.get(capability as CapabilityId);
+      return candidates !== undefined && candidates.length > 0;
     },
 
     resolveTool(

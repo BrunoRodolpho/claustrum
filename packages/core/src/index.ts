@@ -108,6 +108,7 @@ export type {
   Actor,
   ActorRole,
 } from "./tools/types.js";
+export { asCapability, isWellFormedCapability } from "./tools/types.js";
 export { createToolRegistry, type ToolRegistry } from "./tools/registry.js";
 
 // ── Prompting ──────────────────────────────────────────────────────────────

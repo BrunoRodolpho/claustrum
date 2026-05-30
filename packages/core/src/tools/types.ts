@@ -22,6 +22,37 @@ import type { GroundingSpec } from "../ports/grounding.js";
 export type CapabilityId = string & { readonly __brand: "CapabilityId" };
 
 /**
+ * Structural validity check for a capability string: a non-empty,
+ * non-whitespace string. This is the *syntactic* floor — it does NOT assert
+ * the capability is registered (that is the registry's job via
+ * {@link ToolRegistry.hasCapability}). Use this before minting a
+ * {@link CapabilityId} brand from an untrusted source (e.g. a kernel
+ * `IntentEnvelope.kind`) so the brand is never applied to garbage.
+ */
+export function isWellFormedCapability(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * Safely brand a string as a {@link CapabilityId}.
+ *
+ * Returns the branded id when `value` is a well-formed capability string,
+ * or `undefined` when it is not — callers MUST handle the `undefined` case
+ * (fail closed) rather than asserting. This replaces blind `value as
+ * CapabilityId` casts that would otherwise mint a brand over arbitrary
+ * input with no validation (TypeReviewer-004).
+ *
+ * Note: this guards *shape*, not *membership*. To additionally require that
+ * the capability resolves to a registered tool, pair it with
+ * {@link ToolRegistry.hasCapability}.
+ */
+export function asCapability(value: unknown): CapabilityId | undefined {
+  return isWellFormedCapability(value)
+    ? (value as CapabilityId)
+    : undefined;
+}
+
+/**
  * Branded string for intent kinds. Matches the kernel's
  * `IntentEnvelope<K>` parameter. Adopters declare a string union of
  * their intent kinds and cast as needed.

@@ -55,6 +55,7 @@ const stubAdjudicator = {
 const stubTools = {
   list(){ return []; },
   resolveCapabilities(){ return []; },
+  hasCapability(){ return false; },
   resolveTool(){ throw new Error("no tool registered"); },
   register(){},
 };

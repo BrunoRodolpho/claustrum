@@ -19,7 +19,8 @@
 import type { Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule } from "../capsule.js";
 import type { Plan } from "../ports/planner.js";
-import type { CapabilityId } from "../tools/types.js";
+import type { ToolRegistry } from "../tools/registry.js";
+import { asCapability, type CapabilityId } from "../tools/types.js";
 
 export type DispatchResult =
   | {
@@ -106,7 +107,20 @@ export async function dispatchDecision(
           result: undefined,
         };
       }
-      const capability = inferCapability(envelope);
+      // Validate the kind against the registry BEFORE branding it as a
+      // CapabilityId (TypeReviewer-004). An unknown/malformed kind yields
+      // `undefined` and fails closed via the existing tool_unresolved path —
+      // we never mint a brand over an arbitrary string.
+      const capability = inferCapability(envelope, capsule.tools);
+      if (capability === undefined) {
+        return {
+          kind: "failed",
+          phase: "EXECUTE",
+          code: "tool_unresolved",
+          message: unknownCapabilityMessage(envelope.kind),
+          envelope,
+        };
+      }
       // resolveTool throws on an unregistered capability (config drift,
       // role-filtered visibility, hot-deploy gap) and tool.execute carries no
       // no-throw guarantee (a refund tool can 5xx mid-call). A kernel-approved
@@ -138,7 +152,16 @@ export async function dispatchDecision(
 
     case "REWRITE": {
       const envelope = decision.rewritten;
-      const capability = inferCapability(envelope);
+      const capability = inferCapability(envelope, capsule.tools);
+      if (capability === undefined) {
+        return {
+          kind: "failed",
+          phase: "REWRITE",
+          code: "tool_unresolved",
+          message: unknownCapabilityMessage(envelope.kind),
+          envelope,
+        };
+      }
       try {
         const tool = capsule.tools.resolveTool(capability, capsule);
         try {
@@ -293,9 +316,30 @@ function pickEnvelope(plan: Plan): IntentEnvelope | undefined {
  * capability` for the simplest case; richer setups can intercept here
  * via `Capsule.tools` resolution. The base dispatcher does the direct
  * mapping and treats the registry as the source of truth.
+ *
+ * Safety (TypeReviewer-004): rather than blind-casting `envelope.kind as
+ * CapabilityId`, we validate it is (a) a well-formed capability string and
+ * (b) a capability the registry actually knows about, only THEN minting the
+ * brand. A kind that is malformed or unregistered returns `undefined` — the
+ * caller fails closed (a typed `tool_unresolved` failure) instead of
+ * branding garbage and pushing it into `resolveTool`. For valid kinds the
+ * resulting `CapabilityId` is identical to the old cast, so dispatch's
+ * runtime behavior is unchanged.
  */
-function inferCapability(envelope: IntentEnvelope): CapabilityId {
-  return envelope.kind as CapabilityId;
+function inferCapability(
+  envelope: IntentEnvelope,
+  registry: ToolRegistry,
+): CapabilityId | undefined {
+  const candidate = asCapability(envelope.kind);
+  if (candidate === undefined) {
+    return undefined;
+  }
+  return registry.hasCapability(candidate) ? candidate : undefined;
+}
+
+/** Operator-facing message for a kind that did not resolve to a capability. */
+function unknownCapabilityMessage(kind: unknown): string {
+  return `No tool registered for capability "${String(kind)}" in this context.`;
 }
 
 function emptyEnvelope(): IntentEnvelope {
