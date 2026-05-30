@@ -70,8 +70,12 @@ export interface GroundingPort {
 
   /**
    * Attest grounding: map a claim (string) onto retrieved docs and emit
-   * a `GroundingProof`. Implementations match claims by semantic
-   * similarity or by record-id reference within the claim.
+   * a `GroundingProof`. Implementations match claims by exact substring /
+   * normalized-whitespace containment against `chunkText`, or by
+   * record-id reference embedded in the claim. Matching is NOT semantic —
+   * there is no vector similarity or embedding comparison in this
+   * operation. Adopters writing custom adapters must honour this
+   * contract: byte-level / substring matching only.
    */
   attestGrounding(
     docs: RetrievedDocs,
