@@ -40,7 +40,8 @@ export interface AttestContext {
  *
  * The output `SignedEnvelope.envelope` is the enriched envelope — the
  * runtime hands this to the kernel, not the pre-enrichment one. The
- * envelope's `intentHash` is recomputed because the actor changed.
+ * envelope's `intentHash` is preserved from construction time; the actor
+ * enrichment is audit metadata only and must NOT alter the replay key.
  */
 export async function attestWithGatewayKey(
   envelope: IntentEnvelope,

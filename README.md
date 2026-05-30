@@ -51,8 +51,7 @@ This is **the first governance-native conversational runtime framework**. Botpre
 | [`@claustrum/grounding-pgvector`](./packages/grounding-pgvector) | pgvector RAG + grounding-proof generation |
 | [`@claustrum/conformance`](./packages/conformance) | Runtime-side invariant tests adopters can run |
 | [`@claustrum/cli`](./packages/cli) | CLI — scaffolding, conformance runner, replay tools |
-| [`@claustrum/mcp-client`](./packages/mcp-client) | Inbound MCP `ToolPack` adapter (post-MVP) |
-| [`@claustrum/mcp-server`](./packages/mcp-server) | Outbound MCP server (post-MVP) |
+| [`@claustrum/eslint-config`](./packages/eslint-config) | Shared ESLint configuration for all `@claustrum/*` packages |
 
 ## Installation
 
