@@ -24,6 +24,7 @@ import type {
   Session,
   SignedEnvelope,
 } from "@claustrum/core";
+import { isRecipientArtifact } from "@claustrum/core";
 import type { IntentEnvelope } from "@adjudicate/core";
 import { attestWithGatewayKey } from "./attest.js";
 import { matchToParkedByReply } from "./parked-match.js";
@@ -162,13 +163,11 @@ export class WhatsAppChannel implements ChannelDriver {
 function extractRecipient(response: RenderedResponse): string | null {
   if (!response.artifacts) return null;
   for (const artifact of response.artifacts) {
-    if (
-      artifact &&
-      typeof artifact === "object" &&
-      "to" in (artifact as Record<string, unknown>) &&
-      typeof (artifact as { to?: unknown }).to === "string"
-    ) {
-      return (artifact as { to: string }).to;
+    // Typed narrowing (APIReviewer-018): `isRecipientArtifact` proves the
+    // `to: string` shape, so `artifact.to` is a checked access — a missing or
+    // non-string `to` is a guarded skip, never an unchecked cast that throws.
+    if (isRecipientArtifact(artifact)) {
+      return artifact.to;
     }
   }
   return null;

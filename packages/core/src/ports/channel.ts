@@ -35,14 +35,55 @@ export interface ChannelMessage {
   readonly raw?: unknown;
 }
 
+/**
+ * A structured outbound artifact a channel adapter may consume alongside the
+ * rendered text (cards, buttons, routing hints, etc.).
+ *
+ * The set of artifact shapes is open — adopters attach channel-specific
+ * payloads (a button card for WhatsApp, a quick-reply list for web) and the
+ * runtime stays agnostic. The runtime only *structurally* recognizes the
+ * shapes it actually consumes; today that is {@link RecipientArtifact}. Typing
+ * this as `ChannelArtifact` rather than `unknown` (APIReviewer-018) lets
+ * consumers narrow with a typed guard ({@link isRecipientArtifact}) instead of
+ * an unchecked `as { to: string }` cast that throws on a malformed artifact.
+ */
+export type ChannelArtifact = RecipientArtifact | Record<string, unknown>;
+
+/**
+ * Routing artifact carrying the channel-native recipient address. WhatsApp
+ * needs this because the `customerId` on a `RenderedResponse` is a hashed
+ * phone that cannot be un-hashed back to the E.164 `whatsapp:+...` Twilio
+ * requires; the conductor passes the original address through here.
+ */
+export interface RecipientArtifact {
+  /** Channel-native recipient address, e.g. `whatsapp:+14155238886`. */
+  readonly to: string;
+}
+
+/**
+ * Type guard: does `artifact` carry a usable string `to` recipient?
+ * Returns a typed narrowing so consumers avoid an unchecked cast — a missing
+ * or non-string `to` is a guarded `false`, never a runtime throw.
+ */
+export function isRecipientArtifact(
+  artifact: ChannelArtifact,
+): artifact is RecipientArtifact {
+  return (
+    typeof artifact === "object" &&
+    artifact !== null &&
+    "to" in artifact &&
+    typeof (artifact as { to?: unknown }).to === "string"
+  );
+}
+
 export interface RenderedResponse {
   readonly channel: ChannelKind;
   readonly customerId: string;
   readonly conversationId: string;
   /** Final text. Adapters chunk per channel rules. */
   readonly text: string;
-  /** Optional structured artifacts (cards, buttons, etc.). */
-  readonly artifacts?: ReadonlyArray<unknown>;
+  /** Optional structured artifacts (cards, buttons, recipient hints, etc.). */
+  readonly artifacts?: ReadonlyArray<ChannelArtifact>;
   /** Honors REQUEST_CONFIRMATION/DEFER metadata if present. */
   readonly meta?: {
     readonly awaitingConfirmation?: boolean;

@@ -12,11 +12,17 @@
  */
 
 import type { Decision } from "@adjudicate/core";
+import type { ChannelArtifact } from "./channel.js";
 import type { CognitiveState, Plan } from "./planner.js";
 
 export interface DraftResponse {
   readonly text: string;
-  readonly artifacts?: ReadonlyArray<unknown>;
+  /**
+   * Structured artifacts forwarded onto the `RenderedResponse` (cards,
+   * buttons, recipient hints, etc.). Typed as {@link ChannelArtifact} so the
+   * draft → render copy is a typed pass-through (APIReviewer-018).
+   */
+  readonly artifacts?: ReadonlyArray<ChannelArtifact>;
   readonly meta?: Record<string, unknown>;
 }
 
