@@ -76,7 +76,6 @@ const stubSessionFactory = () => {
     async parkPendingConfirmation(){},
     async parkDeferred(){},
     async unpark(){},
-    isStale(){ return false; },
   };
 };
 

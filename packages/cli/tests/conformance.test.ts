@@ -64,7 +64,6 @@ function makeSession(){
     async parkPendingConfirmation(){},
     async parkDeferred(){},
     async unpark(){},
-    isStale(){ return false; },
   };
 }
 const stubMemory = {

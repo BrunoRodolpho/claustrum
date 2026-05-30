@@ -90,7 +90,7 @@ export function createConductor(options: ConductorOptions): Conductor {
   const sessionKeyOf = (channel: ChannelKind, customerId: string): string =>
     `${channel}:${customerId}`;
 
-  const channelsMap: Record<string, ChannelDriver> = {};
+  const channelsMap: Partial<Record<ChannelKind, ChannelDriver>> = {};
   for (const driver of options.channels) {
     channelsMap[driver.kind] = driver;
   }

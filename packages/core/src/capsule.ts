@@ -38,8 +38,14 @@ import type { ToolRegistry } from "./tools/registry.js";
  * A per-channel mapping of drivers, keyed by ChannelKind. Available on
  * the Capsule under `channels`. The runtime's `perceive` phase picks
  * the driver matching the inbound channel.
+ *
+ * Typed as `Partial<…>` so that TypeScript flags missing-key access at
+ * sites that index by a `ChannelKind` — the result is `ChannelDriver |
+ * undefined` and callers must guard before use.  Using the closed `ChannelKind`
+ * union (rather than `string`) prevents arbitrary string keys and preserves
+ * the exhaustive union check when new channel kinds are added.
  */
-export type ChannelMap = Readonly<Record<string, ChannelDriver>>;
+export type ChannelMap = Partial<Readonly<Record<ChannelKind, ChannelDriver>>>;
 
 export interface Capsule {
   // ── Identity ──────────────────────────────────────────────────────────────

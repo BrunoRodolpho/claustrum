@@ -96,7 +96,4 @@ export interface SessionPort {
    * `sessionId`. Called on resumption. No-op if unknown.
    */
   unpark(sessionId: string, intentHash: string): Promise<void>;
-
-  /** True iff the session has been idle long enough to warrant memory consolidation. */
-  isStale(): boolean;
 }

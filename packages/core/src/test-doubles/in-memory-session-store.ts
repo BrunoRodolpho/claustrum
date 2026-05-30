@@ -106,8 +106,4 @@ export class InMemorySessionStore implements SessionPort {
       ),
     });
   }
-
-  isStale(): boolean {
-    return false;
-  }
 }
