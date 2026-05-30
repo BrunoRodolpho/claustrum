@@ -158,4 +158,43 @@ describe("matchToParkedByReply", () => {
     const session = makeSession([parked]);
     expect(matchToParkedByReply("não obrigado", session)?.userResolution).toBe("deny");
   });
+
+  // ── NaN-sticky bug regression (pickMostRecentlyParked) ───────────────────
+
+  it("malformed parkedAt does not block a valid entry from winning", () => {
+    // Envelope with a bad timestamp: Date.parse("NOT_A_DATE") === NaN.
+    // Before the fix, the NaN comparison was always false, so "bad" would
+    // hold `best` for the rest of the loop whenever it appeared first.
+    // After the fix, the bad entry is skipped and the valid entry wins.
+    const bad = makeParked("badTs", "NOT_A_DATE");
+    const good = makeParked("goodTs", "2024-06-03T08:00:00.000Z");
+
+    // bad comes FIRST in the array — the pre-fix NaN-sticky bug meant bad
+    // would remain `best` forever because NaN > anything === false.
+    const session = makeSession([bad, good]);
+    const match = matchToParkedByReply("yes", session);
+    expect(match).not.toBeNull();
+    // The valid (good) entry must win.
+    expect(match?.parked.envelope.intentHash).toBe(good.envelope.intentHash);
+  });
+
+  it("malformed parkedAt does not win when it appears after a valid entry", () => {
+    const good = makeParked("validSeed", "2024-06-01T09:00:00.000Z");
+    const bad = makeParked("malformedSeed", "TOTALLY_WRONG");
+
+    const session = makeSession([good, bad]);
+    const match = matchToParkedByReply("sim", session);
+    // The valid entry must be selected; the malformed one is skipped.
+    expect(match?.parked.envelope.intentHash).toBe(good.envelope.intentHash);
+  });
+
+  it("single malformed-timestamp entry still produces a match (no null)", () => {
+    // If ALL entries have bad timestamps the function falls back to the
+    // last element rather than returning null on a non-empty list.
+    const bad = makeParked("onlyBad", "garbage");
+    const session = makeSession([bad]);
+    const match = matchToParkedByReply("yes", session);
+    // Must match SOMETHING — not null.
+    expect(match).not.toBeNull();
+  });
 });
