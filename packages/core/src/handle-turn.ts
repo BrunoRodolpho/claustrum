@@ -79,13 +79,13 @@ export async function handleTurn(
   const plan = await capsule.planner.propose(cognition);
 
   // 4. SUBMIT — adjudicate exactly once per turn.
-  //    Single envelope -> adjudicate(); multi-envelope -> adjudicatePlan().
-  //    Empty plan still calls adjudicate with a no-op envelope? No — we
-  //    treat an empty plan as "no mutation proposed" and synthesize a
-  //    permissive Decision so downstream code can still respond. This
-  //    keeps "adjudicate called once per turn" honest by routing through
-  //    adjudicatePlan(EMPTY) which the kernel-side stub returns EXECUTE
-  //    for (basis: kernel.empty_plan).
+  //    Single envelope -> adjudicate(); zero or multiple envelopes ->
+  //    adjudicatePlan(). An empty plan is NOT short-circuited: it is
+  //    passed to adjudicatePlan([]) so the "adjudicate called once per
+  //    turn" invariant holds unconditionally. The Adjudicator port
+  //    (and the StubAdjudicator test double) treat an empty envelope
+  //    array as "no mutation proposed" and return EXECUTE with an empty
+  //    basis, allowing downstream code to synthesize a response.
   let decision: Decision;
   if (plan.envelopes.length === 1) {
     decision = await capsule.adjudicate(plan.envelopes[0]);

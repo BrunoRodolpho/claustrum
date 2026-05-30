@@ -66,8 +66,8 @@ export async function attestWithGatewayKey(
   // enrichment is metadata for the audit ledger — it must NOT change the
   // replay key, otherwise retries would dedupe under a different hash and
   // break the ledger contract documented in @adjudicate/core/envelope.
-  // Spec ref: docs/specs/canonical-json-hash.md (intentHash is over
-  // version, kind, payload, nonce, actor, taint AS CONSTRUCTED).
+  // The intentHash is computed over (version, kind, payload, nonce, actor,
+  // taint) AS CONSTRUCTED — see sha256Canonical in @adjudicate/core.
   //
   // Therefore: we sign the canonical bytes of the *enriched* envelope so
   // downstream verification can recompute, but the envelope.intentHash
