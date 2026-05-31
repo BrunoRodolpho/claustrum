@@ -124,13 +124,13 @@ export class WhatsAppChannel implements ChannelDriver {
     }
 
     const delay = this.config.interChunkDelayMs ?? DEFAULT_INTER_CHUNK_MS;
-    for (let i = 0; i < chunks.length; i++) {
+    for (const [i, body] of chunks.entries()) {
       await sendTwilioMessage({
         accountSid: this.config.accountSid,
         authToken: this.config.authToken,
         from: this.config.twilioFrom,
         to,
-        body: chunks[i],
+        body,
         ...(this.config.fetch !== undefined ? { fetch: this.config.fetch } : {}),
       });
       if (i < chunks.length - 1) {

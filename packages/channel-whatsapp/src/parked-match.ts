@@ -46,8 +46,9 @@ export function matchToParkedByReply(
 
   // 1. Hash-prefix probe — most explicit.
   const hashMatch = inbound.match(HASH_PREFIX_RE);
-  if (hashMatch) {
-    const prefix = hashMatch[1].toLowerCase();
+  const hashGroup = hashMatch?.[1];
+  if (hashGroup !== undefined) {
+    const prefix = hashGroup.toLowerCase();
     const hit = parked.find((p) =>
       p.envelope.intentHash.toLowerCase().startsWith(prefix),
     );

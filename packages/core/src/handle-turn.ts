@@ -87,8 +87,9 @@ export async function handleTurn(
   //    array as "no mutation proposed" and return EXECUTE with an empty
   //    basis, allowing downstream code to synthesize a response.
   let decision: Decision;
-  if (plan.envelopes.length === 1) {
-    decision = await capsule.adjudicate(plan.envelopes[0]);
+  const firstEnvelope = plan.envelopes[0];
+  if (plan.envelopes.length === 1 && firstEnvelope !== undefined) {
+    decision = await capsule.adjudicate(firstEnvelope);
   } else {
     decision = await capsule.adjudicatePlan(plan.envelopes);
   }
@@ -117,8 +118,7 @@ export async function handleTurn(
   };
 
   const durationMs = Date.now() - startedAt;
-  const intentHash =
-    plan.envelopes.length > 0 ? plan.envelopes[0].intentHash : undefined;
+  const intentHash = plan.envelopes[0]?.intentHash;
 
   // 7. OBSERVE — fire-and-forget telemetry + memory observation.
   await Promise.all([
