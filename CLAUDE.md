@@ -8,6 +8,7 @@
 | Cognitive-loop spec (`handleTurn`) | [`packages/core/src/handle-turn.ts`](./packages/core/src/handle-turn.ts) |
 | Hybrid state-flow / XState pattern | [docs/architecture/design/hybrid-state-flow.md](./docs/architecture/design/hybrid-state-flow.md) |
 | Tool classification (READ_ONLY vs MUTATING) | [docs/architecture/design/tool-classification.md](./docs/architecture/design/tool-classification.md) |
+| Production tuning (SDK timeouts, pool sizing, resolver/fragment ops) | [docs/ops/production-readiness.md](./docs/ops/production-readiness.md) |
 | ADRs | [docs/decisions/](./docs/decisions/) |
 | Project status, roadmap | [PROJECT_STATUS_AND_NEXT_STEPS.md](./PROJECT_STATUS_AND_NEXT_STEPS.md) |
 | Kernel boundary (`@adjudicate/core`) | https://github.com/BrunoRodolpho/adjudicate |
