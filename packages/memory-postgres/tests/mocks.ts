@@ -99,6 +99,45 @@ export class FakePrismaModel<TRow> implements PrismaModelDelegate<TRow> {
     this.rows.push(row);
     return row;
   }
+
+  async deleteMany(args: { where: Record<string, unknown> }): Promise<{
+    count: number;
+  }> {
+    this.calls.push({
+      model: this.modelName,
+      op: "deleteMany",
+      args,
+      at: performance.now(),
+    });
+    // Honor `{ id: { in: [...] } }` so the batched prune loop terminates as it
+    // would against real Prisma; otherwise treat as a full delete of `rows`.
+    const idIn = (args.where as { id?: { in?: unknown[] } })?.id?.in;
+    if (Array.isArray(idIn)) {
+      const ids = new Set(idIn);
+      let removed = 0;
+      for (let i = this.rows.length - 1; i >= 0; i--) {
+        const id = (this.rows[i] as { id?: unknown })?.id;
+        if (ids.has(id)) {
+          this.rows.splice(i, 1);
+          removed++;
+        }
+      }
+      return { count: removed };
+    }
+    const count = this.rows.length;
+    this.rows.length = 0;
+    return { count };
+  }
+
+  async count(args?: { where?: Record<string, unknown> }): Promise<number> {
+    this.calls.push({
+      model: this.modelName,
+      op: "count",
+      args,
+      at: performance.now(),
+    });
+    return this.rows.length;
+  }
 }
 
 export class FakePrismaClient implements PrismaClientLike {
