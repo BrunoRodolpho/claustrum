@@ -66,6 +66,15 @@ export type {
 } from "./ports/channel.js";
 export { isRecipientArtifact } from "./ports/channel.js";
 
+export type {
+  GatewayKeyProvider,
+  GatewaySigningKey,
+} from "./gateway-attestation.js";
+export {
+  resolveGatewaySigningKey,
+  verifyGatewayAttestation,
+} from "./gateway-attestation.js";
+
 export type { PlannerPort, Plan, CognitiveState } from "./ports/planner.js";
 export type {
   ResponderPort,

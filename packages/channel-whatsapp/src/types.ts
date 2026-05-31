@@ -2,7 +2,7 @@
  * Public types for @claustrum/channel-whatsapp.
  */
 
-import type { ParkedEnvelope } from "@claustrum/core";
+import type { GatewaySigningKey, ParkedEnvelope } from "@claustrum/core";
 
 export interface WhatsAppChannelConfig {
   /** Twilio account SID (`AC...`). */
@@ -16,8 +16,13 @@ export interface WhatsAppChannelConfig {
   /**
    * Gateway signing key (HMAC-SHA256) used by `attest()`. Distinct from the
    * Twilio auth token — this is the runtime ↔ kernel gateway secret.
+   *
+   * A bare `string` is the non-rotating form. Pass `{ current, previous }`
+   * (AuthReviewer-010) to rotate: `attest()` signs with `current`, while
+   * `verifyGatewayAttestation()` also accepts `previous` so envelopes signed
+   * just before a rollover keep verifying during the overlap window.
    */
-  readonly gatewaySigningKey: string;
+  readonly gatewaySigningKey: GatewaySigningKey;
   /**
    * Identifier for the signing key embedded in the SignedEnvelope. Lets the
    * kernel rotate keys without breaking historical audit records.

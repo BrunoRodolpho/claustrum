@@ -7,7 +7,11 @@
 
 import { createHmac } from "node:crypto";
 import { canonicalJson, type IntentEnvelope } from "@adjudicate/core";
-import type { SignedEnvelope } from "@claustrum/core";
+import {
+  resolveGatewaySigningKey,
+  type GatewaySigningKey,
+  type SignedEnvelope,
+} from "@claustrum/core";
 
 export interface WebAttestContext {
   readonly gateway: string;
@@ -16,12 +20,12 @@ export interface WebAttestContext {
 
 export async function attestWebEnvelope(
   envelope: IntentEnvelope,
-  signingKey: string,
+  signingKey: GatewaySigningKey,
   ctx: WebAttestContext,
 ): Promise<SignedEnvelope> {
-  if (typeof signingKey !== "string" || signingKey.length === 0) {
-    throw new Error("attestWebEnvelope: empty signing key");
-  }
+  // Sign with the CURRENT key; verification accepts current OR previous via
+  // verifyGatewayAttestation (AuthReviewer-010). Throws on an empty/missing key.
+  const currentKey = resolveGatewaySigningKey(signingKey);
   if (!envelope || typeof envelope !== "object") {
     throw new Error("attestWebEnvelope: envelope must be an object");
   }
@@ -37,7 +41,7 @@ export async function attestWebEnvelope(
   };
 
   const canonical = canonicalJson(enriched);
-  const signature = createHmac("sha256", signingKey)
+  const signature = createHmac("sha256", currentKey)
     .update(canonical, "utf8")
     .digest("hex");
 

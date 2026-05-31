@@ -24,7 +24,7 @@ import type {
   Session,
   SignedEnvelope,
 } from "@claustrum/core";
-import { isRecipientArtifact } from "@claustrum/core";
+import { isRecipientArtifact, resolveGatewaySigningKey } from "@claustrum/core";
 import type { IntentEnvelope } from "@adjudicate/core";
 import { attestWithGatewayKey } from "./attest.js";
 import { matchToParkedByReply } from "./parked-match.js";
@@ -54,8 +54,13 @@ export class WhatsAppChannel implements ChannelDriver {
     if (!config.accountSid) throw new Error("WhatsAppChannel: accountSid required");
     if (!config.authToken) throw new Error("WhatsAppChannel: authToken required");
     if (!config.twilioFrom) throw new Error("WhatsAppChannel: twilioFrom required");
-    if (!config.gatewaySigningKey)
+    // Resolve to validate: catches both a missing key and a `{current:""}`
+    // provider that the old truthy-check on the object would have let through.
+    try {
+      resolveGatewaySigningKey(config.gatewaySigningKey);
+    } catch {
       throw new Error("WhatsAppChannel: gatewaySigningKey required");
+    }
   }
 
   /**

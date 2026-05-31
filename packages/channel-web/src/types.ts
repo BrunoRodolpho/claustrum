@@ -2,7 +2,7 @@
  * Public types for @claustrum/channel-web.
  */
 
-import type { RenderedResponse } from "@claustrum/core";
+import type { GatewaySigningKey, RenderedResponse } from "@claustrum/core";
 
 /**
  * Pluggable render sink — the host application supplies a callback that
@@ -17,8 +17,12 @@ export interface WebChannelConfig {
    * HMAC-SHA256 signing key used by `attest()`. Same role as the
    * Twilio-channel gateway key — distinct per gateway so a compromise
    * of one channel doesn't forge envelopes for another.
+   *
+   * A bare `string` is the non-rotating form; `{ current, previous }`
+   * (AuthReviewer-010) signs with `current` and lets verification accept
+   * `previous` during a key rollover.
    */
-  readonly gatewaySigningKey: string;
+  readonly gatewaySigningKey: GatewaySigningKey;
   /** Sink that delivers rendered responses to the user. */
   readonly sink: WebSink;
   /**
