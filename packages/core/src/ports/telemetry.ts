@@ -14,6 +14,13 @@
  */
 
 export interface TurnRecord {
+  /**
+   * Telemetry schema version (APIReviewer-015). Lets the LLM-trace / turn store
+   * evolve its shape without ambiguity on read-back. Stamped by the runtime at
+   * emit (`TELEMETRY_SCHEMA_VERSION`); optional so pre-versioned records still
+   * load. Distinct from — and orthogonal to — the kernel's audit recipe.
+   */
+  readonly schemaVersion?: number;
   readonly turnId: string;
   readonly conversationId: string;
   readonly customerId: string;
@@ -30,6 +37,8 @@ export interface TurnRecord {
 }
 
 export interface LLMTrace {
+  /** Telemetry schema version (APIReviewer-015). See TurnRecord.schemaVersion. */
+  readonly schemaVersion?: number;
   readonly turnId: string;
   /** Correlation key to the kernel's AuditRecord. */
   readonly intentHash?: string;
@@ -39,9 +48,22 @@ export interface LLMTrace {
   readonly temperature: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
-  /** PII-scrubbed completion text. */
+  /**
+   * PII-scrubbed completion text. Unbounded by type — adopters with a storage
+   * budget should pass traces through `boundLLMTrace()` before emit to cap this
+   * (and the diagnostic arrays below) and stamp the schema version
+   * (APIReviewer-015 size-budget).
+   */
   readonly completion: string;
+  /**
+   * Per-token logprobs — OPT-IN diagnostic. Large and rarely needed in
+   * production; omit unless actively debugging model calibration.
+   */
   readonly logprobs?: ReadonlyArray<number>;
+  /**
+   * Raw tool-call payloads — OPT-IN diagnostic. Unbounded; omit (or bound via
+   * `boundLLMTrace`) in steady state.
+   */
   readonly toolCallsRaw?: ReadonlyArray<unknown>;
   readonly durationMs: number;
   readonly at: string;

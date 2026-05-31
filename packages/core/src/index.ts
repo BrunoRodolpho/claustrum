@@ -98,6 +98,11 @@ export type {
   TurnRecord,
   MemoryAccess,
 } from "./ports/telemetry.js";
+export {
+  TELEMETRY_SCHEMA_VERSION,
+  boundLLMTrace,
+  type LLMTraceBudget,
+} from "./telemetry-bounds.js";
 export type {
   Adjudicator,
   SystemState,

@@ -22,6 +22,7 @@
 import type { AuditRecord, Decision } from "@adjudicate/core";
 import type { Capsule } from "./capsule.js";
 import { dispatchDecision, type DispatchResult } from "./execution/dispatch.js";
+import { TELEMETRY_SCHEMA_VERSION } from "./telemetry-bounds.js";
 import type { ChannelMessage, RenderedResponse } from "./ports/channel.js";
 import type { CognitiveState, Plan } from "./ports/planner.js";
 import type { DraftResponse } from "./ports/responder.js";
@@ -133,6 +134,7 @@ export async function handleTurn(
       at: new Date().toISOString(),
     }),
     capsule.telemetry.emitTurn({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
       turnId: capsule.turnId,
       conversationId: capsule.conversationId,
       customerId: capsule.customerId,
