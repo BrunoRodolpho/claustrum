@@ -37,6 +37,20 @@ export type DispatchResult =
       readonly reason: string;
     }
   | {
+      /**
+       * A multi-envelope plan (adjudicatePlan, transactional kill-all-or-execute-all)
+       * adjudicated to EXECUTE — every envelope was approved, so dispatch ran each in
+       * order (LogicReviewer-003). One execution per envelope, in plan order. The
+       * single-envelope EXECUTE still yields `kind: "executed"` (byte-equivalent).
+       */
+      readonly kind: "executed_plan";
+      readonly executions: ReadonlyArray<{
+        readonly envelope: IntentEnvelope;
+        readonly toolId: string;
+        readonly result: unknown;
+      }>;
+    }
+  | {
       readonly kind: "refused";
       readonly userText: string;
       readonly code: string;
@@ -93,12 +107,12 @@ export async function dispatchDecision(
 ): Promise<DispatchResult> {
   switch (decision.kind) {
     case "EXECUTE": {
-      // The planned envelope drove this EXECUTE. For multi-envelope plans
-      // the kernel returns one composite EXECUTE; we dispatch each envelope
-      // in order. handleTurn-level callers usually have plan.envelopes.length === 1
-      // for EXECUTE; multi-step is reserved for adjudicatePlan() variants.
-      const envelope = pickEnvelope(plan);
-      if (envelope === undefined) {
+      // adjudicatePlan is transactional (kill-all-or-execute-all): a plan-level
+      // EXECUTE approved EVERY envelope, so dispatch each in order. The old
+      // pickEnvelope(plan) ran only envelopes[0], silently dropping envelopes[1..n]
+      // (LogicReviewer-003). The single-envelope hot path stays byte-equivalent.
+      const envelopes = plan.envelopes;
+      if (envelopes.length === 0) {
         // No envelope -> nothing to execute. Treat as a no-op dispatch.
         return {
           kind: "executed",
@@ -107,47 +121,28 @@ export async function dispatchDecision(
           result: undefined,
         };
       }
-      // Validate the kind against the registry BEFORE branding it as a
-      // CapabilityId (TypeReviewer-004). An unknown/malformed kind yields
-      // `undefined` and fails closed via the existing tool_unresolved path —
-      // we never mint a brand over an arbitrary string.
-      const capability = inferCapability(envelope, capsule.tools);
-      if (capability === undefined) {
-        return {
-          kind: "failed",
-          phase: "EXECUTE",
-          code: "tool_unresolved",
-          message: unknownCapabilityMessage(envelope.kind),
-          envelope,
-        };
+      if (envelopes.length === 1) {
+        return executeEnvelope(envelopes[0] as IntentEnvelope, capsule);
       }
-      // resolveTool throws on an unregistered capability (config drift,
-      // role-filtered visibility, hot-deploy gap) and tool.execute carries no
-      // no-throw guarantee (a refund tool can 5xx mid-call). A kernel-approved
-      // EXECUTE the runtime can't honor must NOT crash the turn.
-      try {
-        const tool = capsule.tools.resolveTool(capability, capsule);
-        try {
-          const result = await tool.execute(envelope.payload, capsule);
-          return { kind: "executed", envelope, toolId: tool.id, result };
-        } catch (e) {
-          return {
-            kind: "failed",
-            phase: "EXECUTE",
-            code: "tool_threw",
-            message: dispatchErrorMessage(e),
-            envelope,
-          };
-        }
-      } catch (e) {
-        return {
-          kind: "failed",
-          phase: "EXECUTE",
-          code: "tool_unresolved",
-          message: dispatchErrorMessage(e),
-          envelope,
-        };
+      // Multi-envelope plan: run each envelope's tool in order. A single envelope's
+      // failure aborts the plan with that typed failure (dispatch has no cross-tool
+      // compensation — multi-envelope rollback is a documented kernel-level concern,
+      // out of scope here). All-success -> executed_plan, one execution per envelope.
+      const executions: Array<{
+        envelope: IntentEnvelope;
+        toolId: string;
+        result: unknown;
+      }> = [];
+      for (const envelope of envelopes) {
+        const r = await executeEnvelope(envelope, capsule);
+        if (r.kind !== "executed") return r;
+        executions.push({
+          envelope: r.envelope,
+          toolId: r.toolId,
+          result: r.result,
+        });
       }
+      return { kind: "executed_plan", executions };
     }
 
     case "REWRITE": {
@@ -308,6 +303,51 @@ const GENERIC_REFUSAL_TEXT =
 
 function pickEnvelope(plan: Plan): IntentEnvelope | undefined {
   return plan.envelopes.length > 0 ? plan.envelopes[0] : undefined;
+}
+
+/**
+ * Resolve + execute ONE approved envelope. Returns `executed` on success or a typed
+ * `failed` (tool_unresolved / tool_threw) — never throws, preserving the
+ * dispatch-no-throw guarantee (RC-R1) for both the single- and multi-envelope EXECUTE
+ * paths. This is the byte-equivalent of the pre-LogicReviewer-003 single-envelope body.
+ */
+async function executeEnvelope(
+  envelope: IntentEnvelope,
+  capsule: Capsule,
+): Promise<DispatchResult> {
+  const capability = inferCapability(envelope, capsule.tools);
+  if (capability === undefined) {
+    return {
+      kind: "failed",
+      phase: "EXECUTE",
+      code: "tool_unresolved",
+      message: unknownCapabilityMessage(envelope.kind),
+      envelope,
+    };
+  }
+  try {
+    const tool = capsule.tools.resolveTool(capability, capsule);
+    try {
+      const result = await tool.execute(envelope.payload, capsule);
+      return { kind: "executed", envelope, toolId: tool.id, result };
+    } catch (e) {
+      return {
+        kind: "failed",
+        phase: "EXECUTE",
+        code: "tool_threw",
+        message: dispatchErrorMessage(e),
+        envelope,
+      };
+    }
+  } catch (e) {
+    return {
+      kind: "failed",
+      phase: "EXECUTE",
+      code: "tool_unresolved",
+      message: dispatchErrorMessage(e),
+      envelope,
+    };
+  }
 }
 
 /**
