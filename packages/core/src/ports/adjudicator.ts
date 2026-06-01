@@ -43,6 +43,13 @@ export type PolicyBundle = unknown;
 
 export interface OutcomeFilter {
   readonly customerId?: string;
+  /**
+   * Tenant scope (APIReviewer-001). Optional: single-tenant deployments omit it
+   * (no cross-tenant rows exist); a multi-tenant caller sets it so an outcome read
+   * cannot return rows from another tenant. The adopter's adjudicator threads this
+   * into the audit query when its store is tenant-partitioned.
+   */
+  readonly tenantId?: string;
   readonly intentKind?: string;
   /** ISO 8601 timestamp string (e.g. "2024-01-01T00:00:00.000Z"). */
   readonly since?: string;
@@ -88,13 +95,26 @@ export interface Adjudicator {
 
   // ── Read APIs (the inverse contract) ──────────────────────────────────────
 
-  /** Memory's operational-recall path. NEVER queried via raw SQL. */
+  /**
+   * Memory's operational-recall path. NEVER queried via raw SQL.
+   *
+   * `tenantId` (APIReviewer-001) is an OPTIONAL tenant scope: single-tenant
+   * deployments omit it; a multi-tenant caller passes it so recall cannot surface
+   * another tenant's envelopes. Optional + trailing, so existing 2-arg callers and
+   * 2-param implementations are unaffected (the adopter wires it into the audit
+   * store query when that store is tenant-partitioned).
+   */
   replayEnvelopesByCustomerId(
     customerId: string,
     since?: Date,
+    tenantId?: string,
   ): Promise<ReadonlyArray<AuditRecord>>;
 
-  streamAuditByIntentHashPrefix(prefix: string): AsyncIterable<AuditRecord>;
+  /** Audit stream by intentHash prefix. `tenantId` is the optional tenant scope (APIReviewer-001). */
+  streamAuditByIntentHashPrefix(
+    prefix: string,
+    tenantId?: string,
+  ): AsyncIterable<AuditRecord>;
 
   getOutcomes(filter: OutcomeFilter): Promise<ReadonlyArray<OutcomeRow>>;
 
