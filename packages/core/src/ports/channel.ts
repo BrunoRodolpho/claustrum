@@ -1,11 +1,13 @@
 /**
  * ChannelDriver — inbound/outbound channel adapter port.
  *
- * Three responsibilities:
+ * Four responsibilities:
  *  - perceive(raw): vendor webhook -> normalized ChannelMessage
  *  - render(response): runtime response -> vendor render call
  *  - attest(envelope): sign the envelope before it enters the kernel
  *    (HMAC over `canonicalBytes(envelope)`)
+ *  - matchToParked(channelEvent, session): resume long-lived sessions by
+ *    matching an inbound reply to a parked confirmation envelope
  *
  * Channel adapters are also responsible for resuming long-lived sessions:
  *  - parked-confirmation matching (yes/no/defer/hash-prefix) lives in the
@@ -14,6 +16,9 @@
  */
 
 import type { IntentEnvelope } from "@adjudicate/core";
+// Type-only import; channel.ts ⇄ session.ts is a pure type cycle (session.ts
+// imports `ChannelKind` from here), fully erased at runtime.
+import type { ParkedEnvelope, Session } from "./session.js";
 
 export type ChannelKind = "whatsapp" | "web";
 
@@ -101,6 +106,36 @@ export interface SignedEnvelope {
   readonly alg: string;
 }
 
+/**
+ * How an inbound reply resolves a parked confirmation:
+ *  - `confirm` — the user affirmed; the conductor re-adjudicates the parked
+ *    envelope with a confirmation receipt (REQUEST_CONFIRMATION → EXECUTE
+ *    only if the kernel's state/taint/auth guards still pass).
+ *  - `deny` — the user declined; the parked envelope is abandoned (unparked).
+ *  - `defer` — the user postponed; the envelope is re-parked as deferred.
+ */
+export type UserResolution = "confirm" | "deny" | "defer";
+
+/**
+ * Result of `ChannelDriver.matchToParked` — the parked envelope an inbound
+ * reply resolves, plus the resolution the reply expresses. `null` (not a
+ * `ParkedMatch`) means "fresh utterance; run the normal cognitive loop".
+ *
+ * The conductor consumes this and issues a *re-adjudication* (never a
+ * dispatch-on-confirm): every resumed EXECUTE side-effect is backed by a
+ * fresh audited Decision (the audit invariant).
+ */
+export interface ParkedMatch {
+  readonly parked: ParkedEnvelope;
+  readonly userResolution: UserResolution;
+  /**
+   * When `userResolution === "defer"`, the natural-language phrase that
+   * triggered the defer (e.g. "tomorrow"). The conductor maps this to a
+   * concrete `deferUntil` — the channel adapter only detects the phrase.
+   */
+  readonly deferPhrase?: string;
+}
+
 export interface ChannelDriver {
   readonly kind: ChannelKind;
 
@@ -135,4 +170,21 @@ export interface ChannelDriver {
   perceive(raw: unknown): Promise<ChannelMessage>;
   render(response: RenderedResponse): Promise<void>;
   attest(envelope: IntentEnvelope): Promise<SignedEnvelope>;
+
+  /**
+   * Resolve an inbound `ChannelMessage` against the session's parked
+   * envelopes (long-lived confirmation/deferral resumption). Returns a
+   * {@link ParkedMatch} when the reply resumes a parked confirmation, or
+   * `null` when it is a fresh utterance and the normal cognitive loop runs.
+   *
+   * Matching is a channel-shaped concern (regex over natural language,
+   * hash-prefix conventions, locale variants) so it lives in the adapter —
+   * the matcher reads `session.pendingConfirmations` and never mutates state
+   * (the `SessionPort` owns durable park/unpark). A channel with no parked-
+   * reply semantics (e.g. the web channel) returns `null` unconditionally.
+   */
+  matchToParked(
+    channelEvent: ChannelMessage,
+    session: Session,
+  ): ParkedMatch | null;
 }

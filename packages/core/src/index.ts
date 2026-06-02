@@ -63,6 +63,8 @@ export type {
   ChannelKind,
   ChannelArtifact,
   RecipientArtifact,
+  ParkedMatch,
+  UserResolution,
 } from "./ports/channel.js";
 export { isRecipientArtifact } from "./ports/channel.js";
 
@@ -110,6 +112,7 @@ export type {
   OutcomeFilter,
   OutcomeRow,
   AuditVerification,
+  ConfirmationReceipt,
 } from "./ports/adjudicator.js";
 export type {
   FewShotIndex,

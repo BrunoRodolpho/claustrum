@@ -18,6 +18,7 @@
 import type { Decision, IntentEnvelope } from "@adjudicate/core";
 import type {
   Adjudicator,
+  ConfirmationReceipt,
   PolicyBundle,
   SystemState,
 } from "./ports/adjudicator.js";
@@ -98,4 +99,18 @@ export interface Capsule {
    */
   adjudicate(envelope: IntentEnvelope): Promise<Decision>;
   adjudicatePlan(envelopes: ReadonlyArray<IntentEnvelope>): Promise<Decision>;
+
+  /**
+   * Forward to `adjudicator.resume(envelope, state, policy, receipt)` with the
+   * capsule's current (fresh, this-turn) state/policy pre-bound — so a resumed
+   * confirmation is re-adjudicated against the state it must still be safe
+   * against (money-safety). Present only when the adjudicator implements the
+   * optional `resume` verb; the resume branch in `handleTurn` guards on it and
+   * degrades to the normal loop when absent. The cognitive loop calls this in
+   * place of `adjudicate` when an inbound reply resumes a parked envelope.
+   */
+  resume?(
+    envelope: IntentEnvelope,
+    receipt?: ConfirmationReceipt,
+  ): Promise<Decision>;
 }

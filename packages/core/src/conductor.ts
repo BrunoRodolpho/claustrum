@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import type { Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule, ChannelMap } from "./capsule.js";
-import type { Adjudicator } from "./ports/adjudicator.js";
+import type { Adjudicator, ConfirmationReceipt } from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind, ChannelMessage } from "./ports/channel.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
@@ -188,6 +188,26 @@ export function createConductor(options: ConductorOptions): Conductor {
             resolution.policy,
           );
         },
+        // Wire `resume` only when the adjudicator implements the optional verb.
+        // Binds THIS turn's freshly-resolved state/policy, so a resumed parked
+        // envelope is re-adjudicated against current state (money-safety).
+        ...(options.adjudicator.resume !== undefined
+          ? {
+              resume(
+                envelope: IntentEnvelope,
+                receipt?: ConfirmationReceipt,
+              ): Promise<Decision> {
+                // Non-null asserted: guarded by the `!== undefined` check above,
+                // and `options` is captured (not mutated) for the capsule's life.
+                return options.adjudicator.resume!(
+                  envelope,
+                  resolution.state,
+                  resolution.policy,
+                  receipt,
+                );
+              },
+            }
+          : {}),
       };
 
         lockHandles.set(capsule, lockHandle);

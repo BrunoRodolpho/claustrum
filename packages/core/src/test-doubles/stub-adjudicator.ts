@@ -15,6 +15,7 @@ import type {
 import type {
   Adjudicator,
   AuditVerification,
+  ConfirmationReceipt,
   OutcomeFilter,
   OutcomeRow,
   PolicyBundle,
@@ -28,6 +29,17 @@ export class StubAdjudicator implements Adjudicator {
   }> = [];
   public readonly adjudicatePlanCalls: Array<{
     readonly envelopes: ReadonlyArray<IntentEnvelope>;
+    readonly at: string;
+  }> = [];
+  /**
+   * Every `resume` call, recorded so a test can assert the loop RE-ADJUDICATED
+   * a parked envelope (vs. the audit-invariant violation of dispatching it
+   * directly on confirm). `receipt` is captured to prove the confirmation
+   * receipt was threaded through.
+   */
+  public readonly resumeCalls: Array<{
+    readonly envelope: IntentEnvelope;
+    readonly receipt: ConfirmationReceipt | undefined;
     readonly at: string;
   }> = [];
 
@@ -74,6 +86,41 @@ export class StubAdjudicator implements Adjudicator {
           kind: "SECURITY",
           code: "stub.plan.danger",
           userFacing: "Não posso fazer isso.",
+        },
+        basis: [],
+      };
+    }
+    return { kind: "EXECUTE", basis: [] };
+  }
+
+  /**
+   * Re-adjudicate a parked envelope. Mirrors `adjudicate`'s kind-based verdict
+   * (`danger` → REFUSE, else EXECUTE) so a money-safety test can model "state
+   * changed at confirm time → REFUSE → no dispatch" by resuming a `danger`
+   * envelope. The receipt is recorded but does not alter the stub's verdict
+   * (the real kernel's REQUEST_CONFIRMATION→EXECUTE flip is exercised against
+   * the production `buildAdjudicator` + a capturing audit sink, not here).
+   */
+  async resume(
+    envelope: IntentEnvelope,
+    _state: SystemState,
+    _policy: PolicyBundle,
+    receipt?: ConfirmationReceipt,
+  ): Promise<Decision> {
+    void _state;
+    void _policy;
+    this.resumeCalls.push({
+      envelope,
+      receipt,
+      at: new Date().toISOString(),
+    });
+    if (envelope.kind === "danger") {
+      return {
+        kind: "REFUSE",
+        refusal: {
+          kind: "STATE",
+          code: "stub.resume.state_changed",
+          userFacing: "Não posso mais concluir isso.",
         },
         basis: [],
       };

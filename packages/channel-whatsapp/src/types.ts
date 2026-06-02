@@ -2,7 +2,12 @@
  * Public types for @claustrum/channel-whatsapp.
  */
 
-import type { GatewaySigningKey, ParkedEnvelope } from "@claustrum/core";
+import type { GatewaySigningKey } from "@claustrum/core";
+
+// `ParkedMatch` / `UserResolution` are now owned by the `@claustrum/core`
+// `ChannelDriver` port (the matchToParked return type). Re-export them here so
+// existing `@claustrum/channel-whatsapp` importers keep their import path.
+export type { ParkedMatch, UserResolution } from "@claustrum/core";
 
 export interface WhatsAppChannelConfig {
   /** Twilio account SID (`AC...`). */
@@ -80,21 +85,4 @@ export interface TwilioInboundRequest {
   readonly signature: string;
   /** Parsed `application/x-www-form-urlencoded` body. */
   readonly body: TwilioWebhookBody;
-}
-
-/**
- * Result of `matchToParkedByReply` — augments the parked envelope with a
- * resolution intent derived from the user reply.
- */
-export type UserResolution = "confirm" | "deny" | "defer";
-
-export interface ParkedMatch {
-  readonly parked: ParkedEnvelope;
-  readonly userResolution: UserResolution;
-  /**
-   * When `userResolution === "defer"`, the natural-language phrase that
-   * triggered the defer. The conductor maps this to a concrete `deferUntil`
-   * (channel adapter doesn't own clock math beyond detection).
-   */
-  readonly deferPhrase?: string;
 }
