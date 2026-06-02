@@ -162,6 +162,15 @@ export interface AnthropicProviderOptions {
    * (ConfigReviewer-006).
    */
   readonly defaultMaxTokens?: number;
+  /**
+   * Optional structured-log hook for non-fatal provider warnings (currently the
+   * `max_tokens` fallback in `toCreateBody`). Adopters wire their logger so the
+   * warning lands in their structured/queryable store (e.g. ibatexas passes its
+   * pino logger). Without it the provider falls back to `console.warn`
+   * (back-compat). This is a caller-supplied callback, not a dependency on
+   * another package — it stays within the adapter boundary.
+   */
+  readonly onWarn?: (message: string, fields: Record<string, unknown>) => void;
 }
 
 // ── Stop-reason normalization ──────────────────────────────────────────────
@@ -193,10 +202,12 @@ export class AnthropicProvider implements ModelProvider {
   private readonly client: AnthropicClientLike;
   private readonly embeddingProxy?: ModelProvider;
   private readonly defaultMaxTokens: number;
+  private readonly onWarn?: (message: string, fields: Record<string, unknown>) => void;
 
   constructor(options: AnthropicProviderOptions) {
     this.client = options.client;
     this.defaultMaxTokens = options.defaultMaxTokens ?? 1024;
+    this.onWarn = options.onWarn;
     if (options.embedding !== undefined) {
       this.embeddingProxy = options.embedding.proxy;
     }
@@ -387,14 +398,25 @@ export class AnthropicProvider implements ModelProvider {
     }));
 
     if (req.maxTokens === undefined) {
-      // Log at warn-level so operators can see the fallback in structured logs
-      // and increase defaultMaxTokens in AnthropicProviderOptions if needed
-      // (ConfigReviewer-006 — silent 1024 truncation).
-      console.warn(
-        `[AnthropicProvider] max_tokens not set on request for model ${req.model}; ` +
-          `using defaultMaxTokens=${this.defaultMaxTokens}. ` +
-          `Raise AnthropicProviderOptions.defaultMaxTokens to avoid silent truncation.`,
-      );
+      // Surface the fallback at warn-level so operators can raise
+      // defaultMaxTokens if needed (ConfigReviewer-006 — silent 1024 truncation).
+      // Through the injected onWarn hook it reaches the adopter's structured log
+      // store (component:"claustrum:anthropic"); without one it falls back to
+      // console.warn (back-compat).
+      const message =
+        `max_tokens not set on request for model ${req.model}; ` +
+        `using defaultMaxTokens=${this.defaultMaxTokens}. ` +
+        `Raise AnthropicProviderOptions.defaultMaxTokens to avoid silent truncation.`;
+      if (this.onWarn) {
+        this.onWarn(message, {
+          component: "claustrum:anthropic",
+          event: "max_tokens_fallback",
+          model: req.model,
+          defaultMaxTokens: this.defaultMaxTokens,
+        });
+      } else {
+        console.warn(`[AnthropicProvider] ${message}`);
+      }
     }
     const body: AnthropicMessagesCreateBody = {
       model: req.model,
