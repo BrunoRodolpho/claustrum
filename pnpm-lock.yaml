@@ -205,6 +205,9 @@ importers:
       eslint:
         specifier: ^9.0.0
         version: 9.39.4
+      pg:
+        specifier: ^8.20.0
+        version: 8.21.0
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -462,9 +465,6 @@ importers:
         specifier: workspace:*
         version: link:../primitives
     devDependencies:
-      '@adjudicate/cli':
-        specifier: workspace:*
-        version: link:../cli
       '@adjudicate/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
