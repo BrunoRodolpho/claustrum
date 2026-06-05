@@ -19,7 +19,11 @@
 
 import { createHmac } from "node:crypto";
 import { canonicalJson, type IntentEnvelope } from "@adjudicate/core";
-import type { SignedEnvelope } from "@claustrum/core";
+import {
+  resolveGatewaySigningKey,
+  type GatewaySigningKey,
+  type SignedEnvelope,
+} from "@claustrum/core";
 
 export interface AttestContext {
   /** Channel kind, written to `actor.channel`. */
@@ -40,16 +44,18 @@ export interface AttestContext {
  *
  * The output `SignedEnvelope.envelope` is the enriched envelope — the
  * runtime hands this to the kernel, not the pre-enrichment one. The
- * envelope's `intentHash` is recomputed because the actor changed.
+ * envelope's `intentHash` is preserved from construction time; the actor
+ * enrichment is audit metadata only and must NOT alter the replay key.
  */
 export async function attestWithGatewayKey(
   envelope: IntentEnvelope,
-  signingKey: string,
+  signingKey: GatewaySigningKey,
   ctx: AttestContext,
 ): Promise<SignedEnvelope> {
-  if (typeof signingKey !== "string" || signingKey.length === 0) {
-    throw new Error("attestWithGatewayKey: empty signing key");
-  }
+  // Sign with the CURRENT key (a bare string, or `{current, previous}.current`).
+  // Throws on an empty/missing key. Verification accepts current OR previous via
+  // verifyGatewayAttestation — see AuthReviewer-010.
+  const currentKey = resolveGatewaySigningKey(signingKey);
   if (!envelope || typeof envelope !== "object") {
     throw new Error("attestWithGatewayKey: envelope must be an object");
   }
@@ -65,8 +71,8 @@ export async function attestWithGatewayKey(
   // enrichment is metadata for the audit ledger — it must NOT change the
   // replay key, otherwise retries would dedupe under a different hash and
   // break the ledger contract documented in @adjudicate/core/envelope.
-  // Spec ref: docs/specs/canonical-json-hash.md (intentHash is over
-  // version, kind, payload, nonce, actor, taint AS CONSTRUCTED).
+  // The intentHash is computed over (version, kind, payload, nonce, actor,
+  // taint) AS CONSTRUCTED — see sha256Canonical in @adjudicate/core.
   //
   // Therefore: we sign the canonical bytes of the *enriched* envelope so
   // downstream verification can recompute, but the envelope.intentHash
@@ -77,7 +83,7 @@ export async function attestWithGatewayKey(
   };
 
   const canonical = canonicalJson(enriched);
-  const signature = createHmac("sha256", signingKey)
+  const signature = createHmac("sha256", currentKey)
     .update(canonical, "utf8")
     .digest("hex");
 

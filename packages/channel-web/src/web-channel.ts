@@ -10,9 +10,12 @@ import type {
   ChannelDriver,
   ChannelKind,
   ChannelMessage,
+  ParkedMatch,
   RenderedResponse,
+  Session,
   SignedEnvelope,
 } from "@claustrum/core";
+import { resolveGatewaySigningKey } from "@claustrum/core";
 import type { IntentEnvelope } from "@adjudicate/core";
 import { attestWebEnvelope } from "./attest.js";
 import { perceiveWebPayload } from "./perceive.js";
@@ -22,8 +25,12 @@ export class WebChannel implements ChannelDriver {
   readonly kind: ChannelKind = "web";
 
   constructor(private readonly config: WebChannelConfig) {
-    if (!config.gatewaySigningKey)
+    // Resolve to validate: catches a missing key and a `{current:""}` provider.
+    try {
+      resolveGatewaySigningKey(config.gatewaySigningKey);
+    } catch {
       throw new Error("WebChannel: gatewaySigningKey required");
+    }
     if (typeof config.sink !== "function") throw new Error("WebChannel: sink required");
     if (!config.gateway) throw new Error("WebChannel: gateway required");
   }
@@ -46,5 +53,19 @@ export class WebChannel implements ChannelDriver {
         ? { keyId: this.config.gatewayKeyId }
         : {}),
     });
+  }
+
+  /**
+   * The web channel has no parked-reply matching: a single-shot HTTP/JSON
+   * request carries no "yes/no/tomorrow" resumption convention (a web client
+   * resumes by re-submitting the intent, or addresses a parked envelope by an
+   * explicit hash through a richer client protocol that is out of scope here).
+   * Returns `null` so every inbound web message runs the normal cognitive
+   * loop — satisfying the `ChannelDriver` port without inventing semantics.
+   */
+  matchToParked(_channelEvent: ChannelMessage, _session: Session): ParkedMatch | null {
+    void _channelEvent;
+    void _session;
+    return null;
   }
 }

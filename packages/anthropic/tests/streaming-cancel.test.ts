@@ -152,4 +152,50 @@ describe("AnthropicProvider streaming cancellation", () => {
       expect(done.outputTokens).toBe(7);
     }
   });
+
+  it("cancelled chunk carries token count fields (NetworkReviewer-006)", async () => {
+    // Cancel mid-stream: finalMessage() throws on genuine mid-stream abort
+    // (message_stop not yet arrived), so token counts are 0. The key
+    // invariant is that the `cancelled` chunk ALWAYS includes inputTokens
+    // and outputTokens fields so callers never receive undefined for spend.
+    const events: AnthropicStreamEvent[] = Array.from({ length: 10 }, (_, i) => ({
+      type: "content_block_delta" as const,
+      index: 0,
+      delta: { type: "text_delta" as const, text: `word${i} ` },
+    }));
+    const client = new FakeAnthropicClient({
+      streamScript: {
+        events,
+        finalMessage: {
+          model: "fake-model",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "joined" }],
+          usage: { input_tokens: 12, output_tokens: 8 },
+        },
+      },
+    });
+    const provider = new AnthropicProvider({ client });
+    const stream = provider.stream(REQ);
+
+    const collected = [];
+    let consumed = 0;
+    for await (const chunk of stream) {
+      collected.push(chunk);
+      consumed += 1;
+      if (consumed === 3) {
+        stream.cancel();
+      }
+      if (chunk.type === "cancelled" || chunk.type === "done") break;
+    }
+
+    const last = collected[collected.length - 1];
+    expect(last.type).toBe("cancelled");
+    if (last.type === "cancelled") {
+      // The cancelled chunk must carry numeric token fields (not undefined).
+      // On mid-stream abort where message_stop has not arrived, counts are 0
+      // because Anthropic delivers usage only in finalMessage().
+      expect(typeof last.inputTokens).toBe("number");
+      expect(typeof last.outputTokens).toBe("number");
+    }
+  });
 });

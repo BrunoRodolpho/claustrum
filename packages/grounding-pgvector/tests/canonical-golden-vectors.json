@@ -1,0 +1,14 @@
+{
+  "_comment": "Cross-implementation conformance vectors for canonical-JSON sha256 (RFC 8785 / JCS). The single source of truth lives here in @adjudicate/canonical; the SAME file is committed in claustrum (packages/grounding-pgvector/tests/) so both repos test their canonicalizer against identical (input -> sha256-hex) pairs. If either implementation drifts, that repo's golden-vectors test fails. Do not edit a hash without regenerating from the reference implementation and updating BOTH copies in lockstep.",
+  "algorithm": "sha256(utf8(canonicalJson(input)))",
+  "vectors": [
+    { "name": "empty-object", "input": {}, "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" },
+    { "name": "key-order-insensitive", "input": { "b": 2, "a": 1, "c": { "z": 1, "y": 2 } }, "sha256": "68502ff8fb4921bec2ebc3a69e16c5576d297982dc1c17438e5119ac18687560" },
+    { "name": "null-preserved", "input": { "a": 1, "c": null }, "sha256": "b54d39aebdb3bab5b1186e562234bebfd98b75eb6267cbf3686b1e6afb2079e0" },
+    { "name": "array-order-preserved", "input": { "list": [3, 1, 2, "x"] }, "sha256": "926f1c557fda424436539dca667ced444f0abb06a0ff6edaacbd9f54451b6ca8" },
+    { "name": "unicode-string", "input": { "name": "café", "emoji": "🔒" }, "sha256": "68538aa053751b78601d00cd05ad9b985f4a84283090a8572c89fe62277c400b" },
+    { "name": "nested-deep", "input": { "a": { "b": { "c": [{ "d": 1 }, { "e": 2 }] } } }, "sha256": "f4d56347ab6275f25c1cb4359ff9d5871dd464d9ffeaf3875b7069c5e0174d2e" },
+    { "name": "grounding-proof-five-tuple", "input": { "chunkText": "hello world", "modelId": "text-embedding-3-small", "recordId": "rec_42", "recordVersion": "v3", "source": "kb://faq/1" }, "sha256": "ef3064e011a5909cfeefe3366542e8eed4229dff3a2eb811092189a29275cf72" },
+    { "name": "envelope-hash-recipe", "input": { "version": 2, "kind": "order.submit", "payload": { "sku": "X", "qty": 2 }, "nonce": "n-1", "actor": { "principal": "llm", "sessionId": "s-1" }, "taint": "UNTRUSTED" }, "sha256": "cd017dd347b4a8c4c748f7a064788f82eb30fd240d6667873b16cefeb4ed4bc0" }
+  ]
+}

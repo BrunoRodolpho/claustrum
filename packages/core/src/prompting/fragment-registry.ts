@@ -35,17 +35,45 @@ export interface PromptFragment {
 export interface FragmentRegistry {
   register(fragment: PromptFragment): void;
   list(): ReadonlyArray<PromptFragment>;
+  /**
+   * The registered fragments projected in priority-ASC order (lower priority
+   * drops LAST under budget pressure), with insertion order as the stable
+   * secondary key. This ordering is ctx-INDEPENDENT, so it is computed once
+   * and cached; the composer applies its ctx-dependent `applies(ctx)` filter
+   * to this list FRESH per turn rather than re-sorting every compose
+   * (PerformanceReviewer-003). Invalidated on every fragment mutation.
+   */
+  priorityOrdered(): ReadonlyArray<PromptFragment>;
   byId(id: string): PromptFragment | undefined;
 }
 
 export function createFragmentRegistry(): FragmentRegistry {
   const byId = new Map<string, PromptFragment>();
+
+  /**
+   * Cached priority-ordered projection. `undefined` = stale; recomputed
+   * lazily on the next `priorityOrdered()` read. Invalidated on `register()`
+   * (the only fragment mutation). Caches ONLY the ctx-independent sort — the
+   * `applies(ctx)` filter stays in the composer and runs per ctx.
+   */
+  let ordered: ReadonlyArray<PromptFragment> | undefined;
+
   return {
     register(fragment: PromptFragment): void {
       byId.set(fragment.id, fragment);
+      // Membership changed -> the cached priority order is stale.
+      ordered = undefined;
     },
     list(): ReadonlyArray<PromptFragment> {
       return Array.from(byId.values());
+    },
+    priorityOrdered(): ReadonlyArray<PromptFragment> {
+      // Stable sort: `Array.prototype.sort` is stable in modern Node, and
+      // `byId.values()` yields insertion order — so equal-priority fragments
+      // keep registration order as the secondary key.
+      return (ordered ??= Array.from(byId.values()).sort(
+        (a, b) => a.priority - b.priority,
+      ));
     },
     byId(id: string): PromptFragment | undefined {
       return byId.get(id);

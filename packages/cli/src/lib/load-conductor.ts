@@ -38,7 +38,8 @@ export async function loadConductorFactory(
     imported = await import(url);
   } catch (err) {
     throw new Error(
-      `Failed to import conductor module at ${absolute}: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to import conductor module at ${absolute}`,
+      { cause: err },
     );
   }
 

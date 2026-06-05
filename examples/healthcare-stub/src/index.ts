@@ -141,7 +141,9 @@ class ConfirmingAdjudicator implements Adjudicator {
 
 // ── Ports ───────────────────────────────────────────────────────────────────
 
-function makePlanner(sessionRef: { current: () => { pendingConfirmations: ReadonlyArray<{ envelope: IntentEnvelope }> } }): PlannerPort {
+function makePlanner(
+  loadSession: () => Promise<{ pendingConfirmations: ReadonlyArray<{ envelope: IntentEnvelope }> }>,
+): PlannerPort {
   return {
     async propose(state): Promise<Plan> {
       const text = state.perception.text.toLowerCase();
@@ -150,7 +152,7 @@ function makePlanner(sessionRef: { current: () => { pendingConfirmations: Readon
       // session's pendingConfirmations using a richer matcher (see
       // @claustrum/channel-whatsapp/parked-match.ts for the production
       // pattern). The demo keeps it simple.
-      const session = sessionRef.current();
+      const session = await loadSession();
       if (
         (text === "yes" || text.includes("confirm")) &&
         session.pendingConfirmations.length > 0
@@ -304,9 +306,12 @@ export function createHealthcareConductor(): HealthcareBundle {
     adjudicator,
     memory: new InMemoryMemoryProvider(),
     grounding: new EmptyGroundingProvider(),
-    planner: makePlanner({
-      current: () => session.current(),
-    }),
+    planner: makePlanner(
+      // Post-SessionHandle refactor there is no global "current" session; the
+      // demo loads its single patient session by (customerId, channel) to read
+      // pendingConfirmations for the "yes"/"confirm" resume path.
+      () => session.load("demo-patient", "web"),
+    ),
     responder: makeResponder(),
     explainer: makeExplainer(),
     handoff: makeHandoff(),

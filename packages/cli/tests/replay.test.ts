@@ -55,6 +55,7 @@ const stubAdjudicator = {
 const stubTools = {
   list(){ return []; },
   resolveCapabilities(){ return []; },
+  hasCapability(){ return false; },
   resolveTool(){ throw new Error("no tool registered"); },
   register(){},
 };
@@ -73,11 +74,9 @@ const stubSessionFactory = () => {
   return {
     async load(){ return session; },
     async save(){},
-    current(){ return session; },
     async parkPendingConfirmation(){},
     async parkDeferred(){},
     async unpark(){},
-    isStale(){ return false; },
   };
 };
 
@@ -110,7 +109,7 @@ export function createConductor() {
     memory: stubMemory,
     tools: stubTools,
     async openCapsule(input){
-      const session = __session.current();
+      const session = await __session.load(input.customerId, input.channel);
       return {
         tenant: { tenantId: "t", displayName: "T", locale: "en", environment: "dev" },
         customerId: input.customerId,
@@ -132,6 +131,7 @@ export function createConductor() {
         handoff: stubHandoff,
         telemetry: stubTelemetry,
         session: __session,
+        loadedSession: session,
         state: {},
         policy: {},
         async adjudicate(env){ return stubAdjudicator.adjudicate(env, {}, {}); },

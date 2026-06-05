@@ -31,6 +31,7 @@ import type {
   ConformanceOptions,
   ConformanceResult,
 } from "../types.js";
+import { withInstrumentedPort } from "../instrumented-port.js";
 
 export const refuseRendersUserTextCheck: ConformanceCheck = {
   id: "CC-004",
@@ -70,64 +71,63 @@ export const refuseRendersUserTextCheck: ConformanceCheck = {
     await conductor.closeCapsule(probeCapsule);
 
     const calls: Array<{ refusal: Refusal; output: string }> = [];
-    const original = explainer.render.bind(explainer);
-    const mutableExplainer = explainer as unknown as {
-      render: (refusal: Refusal) => string;
-    };
-    mutableExplainer.render = (refusal: Refusal): string => {
-      const out = original(refusal);
-      calls.push({ refusal, output: out });
-      return out;
-    };
+    const originalRender = explainer.render.bind(explainer);
 
     const refuseTurns: Array<{ turn: number; refusalCode: string; output: string }> = [];
 
-    try {
-      for (let i = 0; i < sampling; i++) {
-        const ridx = Math.floor(rng() * 0xffffffff);
-        const text = i % 5 === 0 ? `cc004-danger-${i}-${ridx}` : `cc004-turn-${i}-${ridx}`;
-        const inbound: OpenCapsuleInput = {
-          channel: "web",
-          customerId: `cc004-cust-${i % 5}`,
-          inbound: {
+    await withInstrumentedPort(
+      explainer,
+      "render",
+      (_original) => (refusal: Refusal): string => {
+        const out = originalRender(refusal);
+        calls.push({ refusal, output: out });
+        return out;
+      },
+      async (_spy) => {
+        for (let i = 0; i < sampling; i++) {
+          const ridx = Math.floor(rng() * 0xffffffff);
+          const text = i % 5 === 0 ? `cc004-danger-${i}-${ridx}` : `cc004-turn-${i}-${ridx}`;
+          const inbound: OpenCapsuleInput = {
             channel: "web",
             customerId: `cc004-cust-${i % 5}`,
-            conversationId: `cc004-conv-${i % 5}`,
-            text,
-            receivedAt: "2026-05-18T00:00:00.000Z",
-          },
-        };
-        let capsule;
-        try {
-          capsule = await conductor.openCapsule(inbound);
-        } catch {
-          continue;
-        }
-        let result;
-        try {
-          result = await handleTurn(capsule, inbound.inbound);
-        } catch {
+            inbound: {
+              channel: "web",
+              customerId: `cc004-cust-${i % 5}`,
+              conversationId: `cc004-conv-${i % 5}`,
+              text,
+              receivedAt: "2026-05-18T00:00:00.000Z",
+            },
+          };
+          let capsule;
+          try {
+            capsule = await conductor.openCapsule(inbound);
+          } catch {
+            continue;
+          }
+          let result;
+          try {
+            result = await handleTurn(capsule, inbound.inbound);
+          } catch {
+            await conductor.closeCapsule(capsule);
+            continue;
+          }
           await conductor.closeCapsule(capsule);
-          continue;
+          if (result.decision.kind === "REFUSE") {
+            const refusalCode = result.decision.refusal.code;
+            // dispatch already called explainer.render — find the most-recent matching call.
+            const matching = calls
+              .slice()
+              .reverse()
+              .find((c) => c.refusal.code === refusalCode);
+            refuseTurns.push({
+              turn: i,
+              refusalCode,
+              output: matching?.output ?? "",
+            });
+          }
         }
-        await conductor.closeCapsule(capsule);
-        if (result.decision.kind === "REFUSE") {
-          const refusalCode = result.decision.refusal.code;
-          // dispatch already called explainer.render — find the most-recent matching call.
-          const matching = calls
-            .slice()
-            .reverse()
-            .find((c) => c.refusal.code === refusalCode);
-          refuseTurns.push({
-            turn: i,
-            refusalCode,
-            output: matching?.output ?? "",
-          });
-        }
-      }
-    } finally {
-      mutableExplainer.render = original;
-    }
+      },
+    );
 
     if (refuseTurns.length === 0) {
       return {

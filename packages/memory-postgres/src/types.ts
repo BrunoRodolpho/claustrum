@@ -51,6 +51,11 @@ export interface PrismaModelDelegate<TRow> {
       Record<string, unknown>
     >,
   ): Promise<TRow>;
+  /** Bounded retention pruning (ScalabilityReviewer-005). */
+  deleteMany(args: { readonly where: Record<string, unknown> }): Promise<{
+    readonly count: number;
+  }>;
+  count(args?: { readonly where?: Record<string, unknown> }): Promise<number>;
 }
 
 /**

@@ -67,15 +67,17 @@ export function createPromptComposer(
       ctx: PromptContext,
       budget: TokenBudget,
     ): Promise<ComposedPrompt> {
-      // 1. Filter by `applies`.
-      const applicable = options.registry
-        .list()
+      // 1+2. Read the registry's cached priority-ASC projection (lower
+      //    priority drops LAST under pressure; insertion order is the stable
+      //    secondary key) and filter it by `applies` FRESH for this ctx. The
+      //    sort is ctx-independent and memoized in the registry, so it runs
+      //    once per registry state instead of every compose
+      //    (PerformanceReviewer-003). Filtering a stably-sorted list preserves
+      //    relative order, so `sorted` is identical to the old
+      //    filter-then-sort — the fragmentManifest is unchanged.
+      const sorted = options.registry
+        .priorityOrdered()
         .filter((fragment) => fragment.applies(ctx));
-
-      // 2. Sort by priority ASC — lower priority drops LAST under pressure.
-      //    Stable secondary key: registry insertion order. (Array.sort in
-      //    modern Node is stable.)
-      const sorted = applicable.slice().sort((a, b) => a.priority - b.priority);
 
       // 3. Token-budget eviction: include greedily in priority order until
       //    we'd exceed the budget. Priority-0 fragments are inviolable —

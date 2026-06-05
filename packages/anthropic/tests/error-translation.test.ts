@@ -30,15 +30,28 @@ describe("translateAnthropicError", () => {
   });
 
   it("429 → rate_limit handles HTTP-date Retry-After", () => {
-    const future = new Date(Date.now() + 5000).toUTCString();
-    const err = translateAnthropicError({
-      status: 429,
-      message: "rate limit",
-      headers: { "Retry-After": future },
-    });
-    expect(err.code).toBe("rate_limit");
-    expect(err.retryAfterMs).toBeGreaterThan(3000);
-    expect(err.retryAfterMs).toBeLessThanOrEqual(6000);
+    // Use a fixed well-known future HTTP-date so the parsed retryAfterMs is
+    // deterministic.  Wall-clock-relative bounds (`toBeLessThanOrEqual(6000)`)
+    // are flaky; assert the EXACT millisecond delta between the fixed date
+    // and a reference "now" that we supply ourselves.
+    const fixedFutureMs = new Date("2099-01-01T00:00:05.000Z").getTime();
+    const fixedNowMs = new Date("2099-01-01T00:00:00.000Z").getTime();
+    const expectedMs = fixedFutureMs - fixedNowMs; // exactly 5000
+
+    // Temporarily freeze Date.now so parseRetryAfterMs sees our reference now.
+    const realDateNow = Date.now;
+    Date.now = () => fixedNowMs;
+    try {
+      const err = translateAnthropicError({
+        status: 429,
+        message: "rate limit",
+        headers: { "Retry-After": new Date(fixedFutureMs).toUTCString() },
+      });
+      expect(err.code).toBe("rate_limit");
+      expect(err.retryAfterMs).toBe(expectedMs);
+    } finally {
+      Date.now = realDateNow;
+    }
   });
 
   it("401 → auth", () => {

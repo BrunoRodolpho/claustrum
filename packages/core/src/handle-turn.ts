@@ -19,12 +19,14 @@
  *   - LLM only sees `express_intent` (via the tool registry indirection)
  */
 
-import type { AuditRecord, Decision } from "@adjudicate/core";
+import type { AuditRecord, Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule } from "./capsule.js";
 import { dispatchDecision, type DispatchResult } from "./execution/dispatch.js";
+import { TELEMETRY_SCHEMA_VERSION } from "./telemetry-bounds.js";
 import type { ChannelMessage, RenderedResponse } from "./ports/channel.js";
 import type { CognitiveState, Plan } from "./ports/planner.js";
 import type { DraftResponse } from "./ports/responder.js";
+import type { DeferredEnvelope } from "./ports/session.js";
 
 export interface TurnResult {
   readonly response: RenderedResponse;
@@ -63,7 +65,7 @@ export async function handleTurn(
     capsule.memory.recall(capsule.customerId, perception),
     capsule.grounding.retrieve(perception),
   ]);
-  const session = capsule.session.current();
+  const session = capsule.loadedSession;
   const cognition: CognitiveState = {
     perception,
     memory,
@@ -75,26 +77,53 @@ export async function handleTurn(
     turnId: capsule.turnId,
   };
 
-  // 3. PLAN — propose envelopes. NO mutations yet.
-  const plan = await capsule.planner.propose(cognition);
+  // 2b. RESUME (P0-B / LogicReviewer-004) — if this inbound resolves a parked
+  //     confirmation or a now-due deferral, RE-ADJUDICATE the parked envelope
+  //     and act on that fresh Decision. The resume path NEVER dispatches the
+  //     parked envelope directly on confirm: every resumed EXECUTE side-effect
+  //     is backed by a fresh audited Decision (the audit invariant), and a
+  //     confirmation that arrives after the state changed is re-evaluated
+  //     against current state and can REFUSE (money-safety). When nothing is
+  //     resumed, the normal PLAN→SUBMIT below runs byte-equivalently.
+  const resumed = await resolveResume(capsule, inbound);
 
-  // 4. SUBMIT — adjudicate exactly once per turn.
-  //    Single envelope -> adjudicate(); multi-envelope -> adjudicatePlan().
-  //    Empty plan still calls adjudicate with a no-op envelope? No — we
-  //    treat an empty plan as "no mutation proposed" and synthesize a
-  //    permissive Decision so downstream code can still respond. This
-  //    keeps "adjudicate called once per turn" honest by routing through
-  //    adjudicatePlan(EMPTY) which the kernel-side stub returns EXECUTE
-  //    for (basis: kernel.empty_plan).
   let decision: Decision;
-  if (plan.envelopes.length === 1) {
-    decision = await capsule.adjudicate(plan.envelopes[0]);
+  let plan: Plan;
+  if (resumed !== null) {
+    decision = resumed.decision;
+    plan = { envelopes: [resumed.envelope] };
   } else {
-    decision = await capsule.adjudicatePlan(plan.envelopes);
+    // 3. PLAN — propose envelopes. NO mutations yet.
+    plan = await capsule.planner.propose(cognition);
+
+    // 4. SUBMIT — adjudicate exactly once per turn.
+    //    Single envelope -> adjudicate(); zero or multiple envelopes ->
+    //    adjudicatePlan(). An empty plan is NOT short-circuited: it is
+    //    passed to adjudicatePlan([]) so the "adjudicate called once per
+    //    turn" invariant holds unconditionally. The Adjudicator port
+    //    (and the StubAdjudicator test double) treat an empty envelope
+    //    array as "no mutation proposed" and return EXECUTE with an empty
+    //    basis, allowing downstream code to synthesize a response.
+    const firstEnvelope = plan.envelopes[0];
+    if (plan.envelopes.length === 1 && firstEnvelope !== undefined) {
+      decision = await capsule.adjudicate(firstEnvelope);
+    } else {
+      decision = await capsule.adjudicatePlan(plan.envelopes);
+    }
   }
 
   // 5. ACT — dispatch the decision.
   const acted = await dispatchDecision(decision, plan, capsule);
+
+  // 5b. RESUME cleanup — a resolved parked envelope (whether it EXECUTEd or
+  //     REFUSEd on re-adjudication) is unparked so a later inbound cannot match
+  //     it again. unpark removes from BOTH pending-confirmations and deferred.
+  if (resumed !== null) {
+    await capsule.session.unpark(
+      capsule.loadedSession.id,
+      resumed.envelope.intentHash,
+    );
+  }
 
   // 6. SYNTHESIZE — produce the user-facing reply.
   const draft = await capsule.responder.respond({
@@ -117,8 +146,7 @@ export async function handleTurn(
   };
 
   const durationMs = Date.now() - startedAt;
-  const intentHash =
-    plan.envelopes.length > 0 ? plan.envelopes[0].intentHash : undefined;
+  const intentHash = plan.envelopes[0]?.intentHash;
 
   // 7. OBSERVE — fire-and-forget telemetry + memory observation.
   await Promise.all([
@@ -133,6 +161,7 @@ export async function handleTurn(
       at: new Date().toISOString(),
     }),
     capsule.telemetry.emitTurn({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
       turnId: capsule.turnId,
       conversationId: capsule.conversationId,
       customerId: capsule.customerId,
@@ -156,6 +185,109 @@ export async function handleTurn(
   };
 }
 
+/**
+ * Default re-park window (ms) for a confirmation the user postpones ("yes,
+ * tomorrow"). Precise natural-language→deferUntil mapping is a documented
+ * follow-up; the channel adapter detects the phrase, the conductor parks with
+ * a safe default until that lands.
+ */
+const DEFAULT_DEFER_MS = 24 * 60 * 60 * 1000;
+
+interface ResumedTurn {
+  readonly decision: Decision;
+  readonly envelope: IntentEnvelope;
+}
+
+/**
+ * Detect whether `inbound` resumes a parked envelope and, if so, RE-ADJUDICATE
+ * it. Returns the fresh `{ decision, envelope }` to act on, or `null` to run
+ * the normal cognitive loop.
+ *
+ * Two resumption triggers:
+ *  1. A channel-matched reply to a parked REQUEST_CONFIRMATION
+ *     (`ChannelDriver.matchToParked`): `confirm` re-adjudicates WITH a
+ *     confirmation receipt; `deny` abandons (unpark) and falls through;
+ *     `defer` re-parks as deferred and falls through.
+ *  2. A deferred envelope whose `deferUntil` has passed (channel-agnostic):
+ *     re-adjudicate WITHOUT a receipt — EXECUTE only if the kernel's guards
+ *     now pass against fresh state.
+ *
+ * Safe degradation: when the adjudicator does not implement the optional
+ * `resume` verb (`capsule.resume` undefined), this returns `null` — we never
+ * dispatch a parked envelope without re-adjudication.
+ */
+async function resolveResume(
+  capsule: Capsule,
+  inbound: ChannelMessage,
+): Promise<ResumedTurn | null> {
+  if (capsule.resume === undefined) return null;
+  const session = capsule.loadedSession;
+  const driver = capsule.channels[capsule.channel];
+
+  // 1. Channel-specific confirmation-reply matching.
+  const match = driver?.matchToParked(inbound, session) ?? null;
+  if (match !== null) {
+    const env = match.parked.envelope;
+    if (match.userResolution === "confirm") {
+      const decision = await capsule.resume(env, {
+        intentHash: env.intentHash,
+        at: inbound.receivedAt,
+        originalAt: match.parked.parkedAt,
+        ...(match.parked.confirmationToken
+          ? { token: match.parked.confirmationToken }
+          : {}),
+      });
+      return { decision, envelope: env };
+    }
+    if (match.userResolution === "deny") {
+      // Declined → abandon the parked envelope. No mutation, nothing to
+      // adjudicate/audit; the "no" reply runs the normal loop below.
+      await capsule.session.unpark(session.id, env.intentHash);
+      return null;
+    }
+    // defer → re-park as deferred with a safe default window; the reply runs
+    // the normal loop. The deferred envelope resumes via trigger (2) later.
+    await capsule.session.unpark(session.id, env.intentHash);
+    await capsule.session.parkDeferred(
+      session.id,
+      env,
+      match.deferPhrase ?? "later",
+      new Date(Date.parse(inbound.receivedAt) + DEFAULT_DEFER_MS).toISOString(),
+      DEFAULT_DEFER_MS,
+    );
+    return null;
+  }
+
+  // 2. A deferred envelope whose condition (deferUntil) is now satisfied.
+  const due = pickDueDeferred(session.deferredEnvelopes, inbound.receivedAt);
+  if (due !== null) {
+    // No receipt: a plain re-adjudication. The kernel EXECUTEs only if its
+    // guards now pass against fresh state (the deferral condition is met).
+    const decision = await capsule.resume(due.envelope);
+    return { decision, envelope: due.envelope };
+  }
+
+  return null;
+}
+
+/**
+ * The first deferred envelope whose `deferUntil` is at or before `nowIso`.
+ * A malformed/absent `deferUntil` is treated as NOT due (fail-safe: never
+ * resume early). Returns `null` when none are due.
+ */
+function pickDueDeferred(
+  deferred: ReadonlyArray<DeferredEnvelope>,
+  nowIso: string,
+): DeferredEnvelope | null {
+  const now = Date.parse(nowIso);
+  if (!Number.isFinite(now)) return null;
+  for (const d of deferred) {
+    const until = Date.parse(d.deferUntil);
+    if (Number.isFinite(until) && until <= now) return d;
+  }
+  return null;
+}
+
 function buildResponseMeta(
   acted: DispatchResult,
 ): RenderedResponse["meta"] | undefined {
@@ -166,6 +298,8 @@ function buildResponseMeta(
       return { deferred: true };
     case "escalated":
       return { escalated: true };
+    case "failed":
+      return { failed: true };
     default:
       return undefined;
   }

@@ -54,7 +54,15 @@ export interface TurnOutcome {
 }
 
 export interface MemoryPort {
-  /** Hot path. < 100ms p99. */
+  /**
+   * Hot path. < 100ms p99.
+   *
+   * `perception` is reserved/advisory. The reference Postgres adapter keys
+   * the Redis snapshot exclusively on `customerId` — `perception` is
+   * accepted for future adapter use (e.g., channel-specific routing) but
+   * is NOT part of the cache key today. Adopters writing custom adapters
+   * MUST NOT assume `perception` influences what is returned.
+   */
   recall(
     customerId: string,
     perception: Perception,
@@ -63,7 +71,17 @@ export interface MemoryPort {
   /** Write turn artifacts back. May be async-batched by adapters. */
   observe(customerId: string, turn: TurnOutcome): Promise<void>;
 
-  /** Semantic search across non-operational memory kinds. */
+  /**
+   * Semantic search across non-operational memory kinds.
+   *
+   * Note on query-shape divergence: this method's `{ semantic?, tags? }`
+   * query is intentionally different from `FewShotIndex.select`'s
+   * `FewShotQuery` (see `ports/few-shot.ts`). The two ports serve distinct
+   * retrieval concerns — episodic/semantic memory vs. indexed exemplars —
+   * and are not meant to share a unified query shape. `customerId` is a
+   * first-class positional argument here because memory is always
+   * customer-scoped; in `FewShotQuery` tenant is an optional filter field.
+   */
   search(
     customerId: string,
     query: { readonly semantic?: string; readonly tags?: ReadonlyArray<string> },

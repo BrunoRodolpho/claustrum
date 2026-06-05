@@ -46,8 +46,9 @@ export function matchToParkedByReply(
 
   // 1. Hash-prefix probe — most explicit.
   const hashMatch = inbound.match(HASH_PREFIX_RE);
-  if (hashMatch) {
-    const prefix = hashMatch[1].toLowerCase();
+  const hashGroup = hashMatch?.[1];
+  if (hashGroup !== undefined) {
+    const prefix = hashGroup.toLowerCase();
     const hit = parked.find((p) =>
       p.envelope.intentHash.toLowerCase().startsWith(prefix),
     );
@@ -94,17 +95,44 @@ export function matchToParkedByReply(
   return null;
 }
 
+/**
+ * Return the most-recently-parked envelope.
+ *
+ * NaN-sticky bug guard: `Date.parse` returns NaN for malformed timestamps.
+ * NaN comparisons are always false (`NaN > x === false`, `NaN < x === false`),
+ * so a malformed parkedAt causes the comparison to be a no-op — the loop
+ * effectively never advances `best` when the current winner has a bad
+ * timestamp, and a malformed entry that happens to be first will hold
+ * `best` forever regardless of other entries' timestamps.
+ *
+ * Fix: skip any entry whose timestamp is non-finite (NaN or ±Infinity)
+ * and use only entries with valid timestamps for ordering. If NO entry has
+ * a parseable timestamp, fall back to the last element so there is always
+ * a result rather than returning null on a non-empty list.
+ */
 function pickMostRecentlyParked(
   parked: ReadonlyArray<ParkedEnvelope>,
 ): ParkedEnvelope | null {
   if (parked.length === 0) return null;
-  let best = parked[0];
-  for (let i = 1; i < parked.length; i++) {
-    if (Date.parse(parked[i].parkedAt) > Date.parse(best.parkedAt)) {
-      best = parked[i];
+
+  let best: ParkedEnvelope | undefined;
+  let bestTs = -Infinity;
+  const fallback: ParkedEnvelope = parked[parked.length - 1]!;
+
+  for (const entry of parked) {
+    const ts = Date.parse(entry.parkedAt);
+    if (!Number.isFinite(ts)) {
+      // Malformed timestamp — skip this entry for ordering purposes so it
+      // cannot win or block selection (NaN-sticky-bug fix).
+      continue;
+    }
+    if (ts >= bestTs) {
+      bestTs = ts;
+      best = entry;
     }
   }
-  return best;
+
+  return best ?? fallback;
 }
 
 function inferResolutionFromText(text: string): "confirm" | "deny" | "defer" {

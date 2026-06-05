@@ -33,7 +33,7 @@ import type {
   Perception,
   TurnOutcome,
 } from "@claustrum/core";
-import { cacheKey, TTL_SECONDS } from "./cache-keys.js";
+import { cacheKey, TTL_SECONDS, type TtlConfig } from "./cache-keys.js";
 import { semanticSearch } from "./search.js";
 import {
   buildSnapshot,
@@ -70,6 +70,17 @@ export interface PostgresMemoryProviderDeps {
   };
   /** Minimum semantic-fact confidence included in the snapshot. Default 0.3. */
   readonly semanticMinConfidence?: number;
+  /**
+   * Optional TTL overrides (seconds). Any key omitted here falls back to
+   * the module-level `TTL_SECONDS` defaults, so existing callers are
+   * unaffected. Useful for tests or for deployments that need a longer
+   * snapshot TTL in high-traffic environments.
+   *
+   * @example
+   * createPostgresMemoryProvider({ prisma, redis, adjudicator,
+   *   ttls: { snapshot: 120 } })  // double snapshot TTL, rest unchanged
+   */
+  readonly ttls?: Partial<TtlConfig>;
 }
 
 const DEFAULTS = {
@@ -80,15 +91,36 @@ const DEFAULTS = {
   semanticMinConfidence: 0.3,
 } as const;
 
+/**
+ * Operational retention pruning, exposed ON the concrete Postgres provider —
+ * NOT on the core `MemoryPort` (it's a scheduled-job concern, not a cognitive-
+ * loop method). ScalabilityReviewer-005.
+ */
+export interface PostgresMemoryRetention {
+  pruneOlderThan(
+    cutoff: Date,
+    opts?: { readonly batchSize?: number; readonly dryRun?: boolean },
+  ): Promise<{
+    episodic: number;
+    relational: number;
+    errors: ReadonlyArray<{ table: string; message: string }>;
+  }>;
+}
+
 export function createPostgresMemoryProvider(
   deps: PostgresMemoryProviderDeps,
-): MemoryPort {
+): MemoryPort & PostgresMemoryRetention {
   const fanoutEpisodic = deps.fanout?.episodic ?? DEFAULTS.episodic;
   const fanoutSemantic = deps.fanout?.semantic ?? DEFAULTS.semantic;
   const fanoutProcedural = deps.fanout?.procedural ?? DEFAULTS.procedural;
   const fanoutRelational = deps.fanout?.relational ?? DEFAULTS.relational;
   const semMinConf =
     deps.semanticMinConfidence ?? DEFAULTS.semanticMinConfidence;
+
+  // Merge caller-supplied TTL overrides with module defaults. Any key not
+  // present in deps.ttls falls back to TTL_SECONDS, preserving full
+  // back-compat for callers that do not pass ttls at all.
+  const ttls: TtlConfig = { ...TTL_SECONDS, ...deps.ttls };
 
   function reportTiming(durationMs: number, cacheHit: boolean): void {
     if (deps.onRecallTiming) {
@@ -166,7 +198,7 @@ export function createPostgresMemoryProvider(
       // assembled; failing to cache only costs the next caller a re-fetch.
       void deps.redis.setex(
         snapKey,
-        TTL_SECONDS.snapshot,
+        ttls.snapshot,
         JSON.stringify(snapshot),
       );
 
@@ -264,6 +296,69 @@ export function createPostgresMemoryProvider(
       // `intent_audit` directly — it asks the Adjudicator port. The boundary
       // test asserts no raw query in this file references "intent_audit".
       return deps.adjudicator.replayEnvelopesByCustomerId(customerId, since);
+    },
+
+    /**
+     * Retention pruning (ScalabilityReviewer-005). The episodic + relational
+     * tables are append-only (one row per turn / per social signal) and grow
+     * unbounded; this deletes rows older than `cutoff` so an adopter can wire a
+     * scheduled retention job (the analog of ibatexas' RETENTION cleaner).
+     *
+     * OPT-IN by construction: nothing calls this automatically — `recall`/
+     * `observe` are untouched. Semantic + procedural memory are intentionally
+     * NOT pruned (semantic is keyed/upserted, procedural is curated), so aging
+     * out episodic/relational history never drops a learned fact. Deletes in
+     * bounded id-batches (never a blind table-wide `deleteMany`); each table is
+     * fail-soft so one failure doesn't abort the other. `dryRun` counts only.
+     */
+    async pruneOlderThan(
+      cutoff: Date,
+      opts: { readonly batchSize?: number; readonly dryRun?: boolean } = {},
+    ): Promise<{
+      episodic: number;
+      relational: number;
+      errors: ReadonlyArray<{ table: string; message: string }>;
+    }> {
+      const batchSize = opts.batchSize ?? 1000;
+      const dryRun = opts.dryRun ?? false;
+      const errors: { table: string; message: string }[] = [];
+      const counts = { episodic: 0, relational: 0 };
+
+      const tables = [
+        ["episodic", deps.prisma.claustrum_memory_episodic, "recorded_at"],
+        ["relational", deps.prisma.claustrum_memory_relational, "observed_at"],
+      ] as const;
+
+      for (const [key, model, field] of tables) {
+        try {
+          const where = { [field]: { lt: cutoff } };
+          if (dryRun) {
+            counts[key] = await model.count({ where });
+            continue;
+          }
+          // Bounded id-batches — never a blind table-wide deleteMany.
+          for (;;) {
+            const batch = (await model.findMany({
+              where,
+              select: { id: true },
+              take: batchSize,
+            })) as ReadonlyArray<{ id: string }>;
+            if (batch.length === 0) break;
+            const ids = batch.map((r) => r.id);
+            const { count } = await model.deleteMany({
+              where: { id: { in: ids } },
+            });
+            counts[key] += count;
+            if (batch.length < batchSize) break;
+          }
+        } catch (err) {
+          errors.push({
+            table: key,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return { ...counts, errors };
     },
   };
 }

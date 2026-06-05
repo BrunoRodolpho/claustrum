@@ -104,6 +104,45 @@ describe("OpenAIProvider streaming cancellation", () => {
     const out = await reader;
     expect(out[out.length - 1]).toBe("cancelled");
   });
+
+  it("cancelled chunk carries running token counts (NetworkReviewer-006)", async () => {
+    // Stream includes a usage chunk before cancellation so we can verify the
+    // token counts are propagated onto the cancelled event.
+    const chunks: OpenAIChatCompletionChunk[] = [
+      // usage chunk arrives first (include_usage mode — one chunk with tokens)
+      {
+        choices: [],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      },
+      // many text chunks to consume before cancel
+      ...Array.from({ length: 20 }, (_, i) => ({
+        choices: [{ index: 0, delta: { content: `t${i}` }, finish_reason: null as null }],
+      })),
+    ];
+    const client = new FakeOpenAIClient({ streamScript: { chunks }, streamDelayMs: 1 });
+    const provider = new OpenAIProvider({ client });
+    const stream = provider.stream(REQ);
+
+    const collected = [];
+    let consumed = 0;
+    for await (const chunk of stream) {
+      collected.push(chunk);
+      consumed += 1;
+      if (consumed === 3) {
+        stream.cancel();
+      }
+      if (chunk.type === "cancelled" || chunk.type === "done") break;
+    }
+
+    const last = collected[collected.length - 1];
+    expect(last.type).toBe("cancelled");
+    if (last.type === "cancelled") {
+      // Should carry the accumulated usage (10 input, 5 output) onto the
+      // cancelled chunk so callers see partial spend rather than nothing.
+      expect(last.inputTokens).toBe(10);
+      expect(last.outputTokens).toBe(5);
+    }
+  });
 });
 
 describe("OpenAIProvider tool-call stitching", () => {

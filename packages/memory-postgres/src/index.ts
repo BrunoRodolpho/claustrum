@@ -29,6 +29,13 @@ export {
 
 export { semanticSearch } from "./search.js";
 
+export {
+  PostgresAdvisorySessionLock,
+  advisoryLockId,
+  type AdvisoryLockPool,
+  type AdvisoryLockClient,
+} from "./advisory-session-lock.js";
+
 export type {
   PrismaClientLike,
   PrismaModelDelegate,

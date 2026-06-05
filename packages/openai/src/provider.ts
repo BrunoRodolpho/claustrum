@@ -308,7 +308,9 @@ export class OpenAIProvider implements ModelProvider {
         }
 
         if (aborted) {
-          yield { type: "cancelled" };
+          // Carry the running token counts so callers can account for partial
+          // spend on aborted streams (NetworkReviewer-006).
+          yield { type: "cancelled", inputTokens, outputTokens };
           return;
         }
 
@@ -321,7 +323,9 @@ export class OpenAIProvider implements ModelProvider {
       } catch (err) {
         const translated = translateOpenAIError(err);
         if (translated.code === "cancelled") {
-          yield { type: "cancelled" };
+          // Carry accumulated token counts even when the SDK throws an abort
+          // error mid-iteration so partial spend is visible (NetworkReviewer-006).
+          yield { type: "cancelled", inputTokens, outputTokens };
           return;
         }
         throw translated;

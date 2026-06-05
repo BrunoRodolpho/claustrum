@@ -136,3 +136,4 @@ Cart keys (`active:carts`, `cart:nudge:*`, `cart:owner:*`, `cart:create:lock:*`)
 - [`docs/architecture/design/hybrid-state-flow.md`](../architecture/design/hybrid-state-flow.md) — long-form design including snapshot persistence handler details.
 - [`docs/architecture/design/whatsapp-state-builder.md`](../architecture/design/whatsapp-state-builder.md) — the WhatsApp `lastCustomerMessageAt` state-projection pattern that uses `wa:phone:{phoneHash}` keys.
 - [`docs/ops/defer-troubleshooting.md`](./defer-troubleshooting.md) — DEFER runbook (parked envelopes referenced by `intentHash` flow through session state).
+- [`docs/ops/production-readiness.md`](./production-readiness.md) — production tuning for SDK timeouts/retries, connection-pool sizing + `statement_timeout`, the `TenantResolver` per-turn caching contract, and fragment-registry boundedness/replay.

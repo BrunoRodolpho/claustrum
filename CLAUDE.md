@@ -5,9 +5,10 @@
 | Need | Go to |
 |------|-------|
 | Long-form architecture (runtime ⇄ kernel split) | [docs/architecture/design/runtime-kernel-layer-split.md](./docs/architecture/design/runtime-kernel-layer-split.md) |
-| Cognitive-loop spec (`handleTurn`) | [docs/architecture/design/cognitive-loop.md](./docs/architecture/design/cognitive-loop.md) |
+| Cognitive-loop spec (`handleTurn`) | [`packages/core/src/handle-turn.ts`](./packages/core/src/handle-turn.ts) |
 | Hybrid state-flow / XState pattern | [docs/architecture/design/hybrid-state-flow.md](./docs/architecture/design/hybrid-state-flow.md) |
 | Tool classification (READ_ONLY vs MUTATING) | [docs/architecture/design/tool-classification.md](./docs/architecture/design/tool-classification.md) |
+| Production tuning (SDK timeouts, pool sizing, resolver/fragment ops) | [docs/ops/production-readiness.md](./docs/ops/production-readiness.md) |
 | ADRs | [docs/decisions/](./docs/decisions/) |
 | Project status, roadmap | [PROJECT_STATUS_AND_NEXT_STEPS.md](./PROJECT_STATUS_AND_NEXT_STEPS.md) |
 | Kernel boundary (`@adjudicate/core`) | https://github.com/BrunoRodolpho/adjudicate |
@@ -28,20 +29,20 @@
 
 3. **The cognitive loop is invariant.** `perceive → understand → plan → submit → act → synthesize → observe`. `adjudicate()` is called **exactly once per turn** (or `adjudicatePlan()` for multi-step). The runtime never mutates state without a positive Decision. Every `Decision` variant has a defined handler — `EXECUTE`, `REFUSE`, `DEFER`, `ESCALATE`, `REQUEST_CONFIRMATION`, `REWRITE` — no throws.
 
-4. **The 13 ports are conceptual boundaries, not just types.** Every adapter package implements one or more ports:
+4. **The 13 ports are conceptual boundaries, not just types.** Every adapter package implements one or more ports. Authoritative names are the exported types in `packages/core/src/index.ts` (`// ── Ports ──` section):
    - `ModelProvider` — LLM completion + streaming + embedding
-   - `MemoryProvider` — episodic/semantic recall; `recentActions()` reads kernel ledger via `Adjudicator.replayEnvelopesByCustomerId` (NEVER raw SQL into `intent_audit`)
-   - `GroundingProvider` — RAG + grounding-proof generation
+   - `MemoryPort` — episodic/semantic recall; `recentActions()` reads kernel ledger via `Adjudicator.replayEnvelopesByCustomerId` (NEVER raw SQL into `intent_audit`)
+   - `GroundingPort` — RAG + grounding-proof generation
    - `ChannelDriver` — `perceive`/`render`/`attest`; long-lived session resumption via `matchToParked(channelEvent, session)`
-   - `ToolPack` — domain tools exposed by capability
-   - `FewShotProvider` — indexed retrieval of conversation exemplars; gold outcomes include expected `Decision`
-   - `SessionStore` — persist `Session` across turns, including parked envelopes
-   - `TelemetrySink` — `emitTurn`, `emitLLMTrace`, `emitMemoryAccess`; LLM-trace storage is **separate retention** from the audit ledger
+   - `FewShotIndex` — indexed retrieval of conversation exemplars; gold outcomes include expected `Decision`
+   - `SessionPort` — persist `Session` across turns, including parked envelopes
+   - `TelemetryPort` — `emitTurn`, `emitLLMTrace`, `emitMemoryAccess`; LLM-trace storage is **separate retention** from the audit ledger
    - `PlannerPort` — proposes `IntentEnvelope[]` from `CognitiveState`
    - `ResponderPort` — generates user-facing response
    - `ExplainerPort` — renders refusal text via explain templates
    - `HandoffPort` — human escalation queue
    - `Adjudicator` — the only kernel-facing port
+   - `TenantResolver` — bridge between an inbound channel event and per-turn `(SystemState, PolicyBundle)`
 
    No adapter depends on another. All depend on `@claustrum/core` for the port type only.
 

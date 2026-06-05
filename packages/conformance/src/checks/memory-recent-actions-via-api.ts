@@ -17,12 +17,12 @@
  * without calling the Adjudicator pass vacuously — the check skips
  * them. Production Postgres-backed implementations that bypass the
  * Adjudicator and reach into `intent_audit` directly are caught by
- * the static rule: those callers will fail this counter check.
+ * this runtime counter check.
  *
  * The "no raw SQL with intent_audit" half of the invariant is enforced
- * statically by the package's own lint config — there's no clean way
- * to instrument SQL string assembly inside an adopter's MemoryPort
- * from the outside. The counter check is the runtime half.
+ * ONLY at runtime by this counter check — there is no static lint rule
+ * in the package's eslint config that catches raw SQL usage. The
+ * counter check is the sole enforcement mechanism.
  */
 
 import type { AuditRecord } from "@adjudicate/core";
@@ -32,6 +32,7 @@ import type {
   ConformanceOptions,
   ConformanceResult,
 } from "../types.js";
+import { withInstrumentedPort } from "../instrumented-port.js";
 
 export const memoryRecentActionsViaApiCheck: ConformanceCheck = {
   id: "CC-005",
@@ -44,36 +45,32 @@ export const memoryRecentActionsViaApiCheck: ConformanceCheck = {
 
     let replayCount = 0;
     const adjudicator = conductor.adjudicator;
-    const original = adjudicator.replayEnvelopesByCustomerId.bind(adjudicator);
-    const mutableAdj = adjudicator as unknown as {
-      replayEnvelopesByCustomerId: (
-        customerId: string,
-        since?: Date,
-      ) => Promise<ReadonlyArray<AuditRecord>>;
-    };
-
-    mutableAdj.replayEnvelopesByCustomerId = async (
-      customerId: string,
-      since?: Date,
-    ): Promise<ReadonlyArray<AuditRecord>> => {
-      replayCount++;
-      return original(customerId, since);
-    };
+    const originalBound = adjudicator.replayEnvelopesByCustomerId.bind(adjudicator);
 
     let memoryThrew: Error | undefined;
     let recentActionsResult: ReadonlyArray<AuditRecord> = [];
-    try {
-      try {
-        recentActionsResult = await conductor.memory.recentActions(
-          "cc005-probe",
-          new Date("2026-05-18T00:00:00.000Z"),
-        );
-      } catch (err) {
-        memoryThrew = err instanceof Error ? err : new Error(String(err));
-      }
-    } finally {
-      mutableAdj.replayEnvelopesByCustomerId = original;
-    }
+
+    await withInstrumentedPort(
+      adjudicator,
+      "replayEnvelopesByCustomerId",
+      (_original) => async (
+        customerId: string,
+        since?: Date,
+      ): Promise<ReadonlyArray<AuditRecord>> => {
+        replayCount++;
+        return originalBound(customerId, since);
+      },
+      async (_spy) => {
+        try {
+          recentActionsResult = await conductor.memory.recentActions(
+            "cc005-probe",
+            new Date("2026-05-18T00:00:00.000Z"),
+          );
+        } catch (err) {
+          memoryThrew = err instanceof Error ? err : new Error(String(err));
+        }
+      },
+    );
 
     if (memoryThrew !== undefined) {
       return {

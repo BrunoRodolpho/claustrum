@@ -7,6 +7,7 @@
 
 export {
   AnthropicProvider,
+  wrapAnthropicSdk,
   type AnthropicProviderOptions,
   type AnthropicClientLike,
   type AnthropicMessagesCreateBody,

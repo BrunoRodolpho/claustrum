@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import type { Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule, ChannelMap } from "./capsule.js";
-import type { Adjudicator } from "./ports/adjudicator.js";
+import type { Adjudicator, ConfirmationReceipt } from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind, ChannelMessage } from "./ports/channel.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
@@ -25,6 +25,8 @@ import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
 import type { ResponderPort } from "./ports/responder.js";
 import type { SessionPort } from "./ports/session.js";
+import type { SessionLock, SessionLockHandle } from "./ports/session-lock.js";
+import { InMemorySessionLock } from "./test-doubles/in-memory-session-lock.js";
 import type { TelemetryPort } from "./ports/telemetry.js";
 import type { TenantResolver } from "./ports/tenant.js";
 import type { Actor } from "./tools/types.js";
@@ -45,6 +47,17 @@ export interface ConductorOptions {
   readonly tenantResolver: TenantResolver;
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
+  /**
+   * Per-session lock that serializes concurrent turns for one session
+   * (RC-R3 / Decision 1). Defaults to an in-process `InMemorySessionLock`,
+   * which is correct for a SINGLE replica only. Multi-process deployments
+   * MUST inject a distributed lock (e.g. `PostgresAdvisorySessionLock` from
+   * @claustrum/memory-postgres) or two replicas will double-adjudicate the
+   * same session.
+   */
+  readonly sessionLock?: SessionLock;
+  /** Max time to wait for a contended session lock before failing the turn closed. Default 10s. */
+  readonly sessionLockTimeoutMs?: number;
 }
 
 export interface OpenCapsuleInput {
@@ -68,8 +81,16 @@ export interface Conductor {
 
 export function createConductor(options: ConductorOptions): Conductor {
   const id = options.idFactory ?? randomUUID;
+  const sessionLock: SessionLock = options.sessionLock ?? new InMemorySessionLock();
+  const lockTimeoutMs = options.sessionLockTimeoutMs ?? 10_000;
+  // Per-capsule lock handle, released in closeCapsule. WeakMap keeps the
+  // Capsule type free of lock internals and lets a dropped capsule GC its lock.
+  const lockHandles = new WeakMap<Capsule, SessionLockHandle>();
 
-  const channelsMap: Record<string, ChannelDriver> = {};
+  const sessionKeyOf = (channel: ChannelKind, customerId: string): string =>
+    `${channel}:${customerId}`;
+
+  const channelsMap: Partial<Record<ChannelKind, ChannelDriver>> = {};
   for (const driver of options.channels) {
     channelsMap[driver.kind] = driver;
   }
@@ -83,8 +104,23 @@ export function createConductor(options: ConductorOptions): Conductor {
     tools: options.tools,
 
     async openCapsule(input: OpenCapsuleInput): Promise<Capsule> {
-      // Resolve tenant + state + policy.
-      const resolution = await options.tenantResolver.resolve({
+      // Acquire the per-session lock FIRST and hold it for the whole turn
+      // (released in closeCapsule). This serializes concurrent turns for the
+      // same session so adjudicate() fires exactly once per turn (RC-R3).
+      // Fail closed on contention timeout rather than proceed unserialized.
+      const lockKey = sessionKeyOf(input.channel, input.customerId);
+      const lockHandle = await sessionLock.acquire(lockKey, {
+        timeoutMs: lockTimeoutMs,
+      });
+      if (lockHandle === null) {
+        throw new Error(
+          `Conductor.openCapsule: timed out acquiring session lock for ${lockKey} after ${lockTimeoutMs}ms; refusing to run an unserialized turn`,
+        );
+      }
+
+      try {
+        // Resolve tenant + state + policy.
+        const resolution = await options.tenantResolver.resolve({
         channel: input.channel,
         customerId: input.customerId,
         ...(input.sessionKey !== undefined
@@ -133,6 +169,7 @@ export function createConductor(options: ConductorOptions): Conductor {
         handoff: options.handoff,
         telemetry: options.telemetry,
         session: options.session,
+        loadedSession: session,
         state: resolution.state,
         policy: resolution.policy,
         adjudicate(envelope: IntentEnvelope): Promise<Decision> {
@@ -151,17 +188,54 @@ export function createConductor(options: ConductorOptions): Conductor {
             resolution.policy,
           );
         },
+        // Wire `resume` only when the adjudicator implements the optional verb.
+        // Binds THIS turn's freshly-resolved state/policy, so a resumed parked
+        // envelope is re-adjudicated against current state (money-safety).
+        ...(options.adjudicator.resume !== undefined
+          ? {
+              resume(
+                envelope: IntentEnvelope,
+                receipt?: ConfirmationReceipt,
+              ): Promise<Decision> {
+                // Non-null asserted: guarded by the `!== undefined` check above,
+                // and `options` is captured (not mutated) for the capsule's life.
+                return options.adjudicator.resume!(
+                  envelope,
+                  resolution.state,
+                  resolution.policy,
+                  receipt,
+                );
+              },
+            }
+          : {}),
       };
 
-      return capsule;
+        lockHandles.set(capsule, lockHandle);
+        return capsule;
+      } catch (err) {
+        // Building the capsule failed — don't strand the lock.
+        await lockHandle.release();
+        throw err;
+      }
     },
 
     async closeCapsule(capsule: Capsule): Promise<void> {
-      // Persist the (possibly mutated) session. Adapters may no-op if
-      // their `save` is a pass-through. Telemetry flushes here too, if
-      // an adapter implements batching.
-      await options.session.save(options.session.current());
-      void capsule;
+      try {
+        // Persist THIS capsule's session. We re-read by this capsule's own
+        // (customerId, channel) rather than any global "last loaded" handle —
+        // the SessionPort has no such accessor (RC-R3 footgun removed). The
+        // per-session lock is still held, so re-reading the session for this
+        // key returns the state THIS turn mutated.
+        const latest = await options.session.load(
+          capsule.customerId,
+          capsule.channel,
+        );
+        await options.session.save(latest);
+      } finally {
+        // Always release the per-session lock, even if save throws.
+        await lockHandles.get(capsule)?.release();
+        lockHandles.delete(capsule);
+      }
     },
   };
 }

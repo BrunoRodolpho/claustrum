@@ -15,10 +15,14 @@
  * wall-clock witness, not a content-identifier. Including it would
  * break the kernel's ability to verify a stored proof on replay.
  *
- * Inlined here rather than imported from `@adjudicate/core` to honour
- * adapter boundary discipline (the runtime grounding adapter does not
- * pull in kernel internals). A cross-package golden-vector test in
- * `@claustrum/conformance` will lock the two implementations together.
+ * The canonical source of truth is the standalone `@adjudicate/canonical`
+ * package (RFC 8785 / JCS). This encoder is kept inline here for now (the
+ * grounding adapter is not yet workspace-linked to the kernel repo), but it
+ * is LOCKED against drift by `tests/canonical-golden-vectors.json`, which is
+ * byte-identical to `@adjudicate/canonical/golden-vectors.json`. If this
+ * encoder ever diverges from the kernel's, `canonical-conformance.test.ts`
+ * fails here. Once the runtime is workspace-linked to the live kernel, import
+ * `sha256Canonical` from `@adjudicate/canonical` and delete this inline copy.
  */
 
 import { createHash } from "node:crypto";
@@ -57,10 +61,23 @@ export interface BuildProofInput extends ProofHashInput {
  * Recursively canonicalize a value: object keys sorted lexicographically,
  * arrays preserve order, `undefined` fields elided, `null` passes through.
  *
- * Mirrors `adjudicate/packages/core/src/hash.ts` `canonicalize()` exactly.
+ * Mirrors `@adjudicate/canonical` `canonicalize()` exactly (locked by
+ * tests/canonical-golden-vectors.json + the NFC/non-finite tests in
+ * canonical-conformance.test.ts). Strings are NFC-normalized and non-finite
+ * numbers throw — both required so this proof hasher cannot drift from the
+ * kernel's encoder (RC-X1 + DataReviewer-008 / CryptoReviewer-002).
  */
 function canonicalize(value: unknown): unknown {
   if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value.normalize("NFC");
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new RangeError(
+        `canonical-JSON: non-finite number (${String(value)}) has no canonical representation (RFC 8785 §3.2.2.3)`,
+      );
+    }
+    return value;
+  }
   if (typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(canonicalize);
 

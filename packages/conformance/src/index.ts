@@ -27,7 +27,7 @@
  */
 
 export { runConformance } from "./runner.js";
-export { DEFAULT_CHECKS } from "./checks.js";
+export { DEFAULT_CHECKS } from "./default-checks.js";
 export {
   type ConformanceCheck,
   type ConformanceOptions,

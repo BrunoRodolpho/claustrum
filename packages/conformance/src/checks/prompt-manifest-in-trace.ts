@@ -34,10 +34,8 @@ import {
   handleTurn,
   type Conductor,
   type LLMTrace,
-  type MemoryAccess,
   type OpenCapsuleInput,
   type TelemetryPort,
-  type TurnRecord,
 } from "@claustrum/core";
 import { lcg } from "../prng.js";
 import type {
@@ -45,6 +43,7 @@ import type {
   ConformanceOptions,
   ConformanceResult,
 } from "../types.js";
+import { withInstrumentedPort } from "../instrumented-port.js";
 
 const FRAGMENT_ID_PATTERN = /^[a-zA-Z0-9_.\-:/]+$/;
 
@@ -90,48 +89,44 @@ export const promptManifestInTraceCheck: ConformanceCheck = {
 
     const traces: LLMTrace[] = [];
     const originalEmitLLMTrace = telemetry.emitLLMTrace.bind(telemetry);
-    const mutableTelemetry = telemetry as unknown as {
-      emitLLMTrace: (trace: LLMTrace) => Promise<void>;
-      emitTurn: (turn: TurnRecord) => Promise<void>;
-      emitMemoryAccess: (access: MemoryAccess) => Promise<void>;
-    };
 
-    mutableTelemetry.emitLLMTrace = async (trace: LLMTrace): Promise<void> => {
-      traces.push(trace);
-      return originalEmitLLMTrace(trace);
-    };
-
-    try {
-      for (let i = 0; i < sampling; i++) {
-        const ridx = Math.floor(rng() * 0xffffffff);
-        const text = `cc003-turn-${i}-${ridx}`;
-        const inbound: OpenCapsuleInput = {
-          channel: "web",
-          customerId: `cc003-cust-${i % 5}`,
-          inbound: {
+    await withInstrumentedPort(
+      telemetry,
+      "emitLLMTrace",
+      (_original) => async (trace: LLMTrace): Promise<void> => {
+        traces.push(trace);
+        return originalEmitLLMTrace(trace);
+      },
+      async (_spy) => {
+        for (let i = 0; i < sampling; i++) {
+          const ridx = Math.floor(rng() * 0xffffffff);
+          const text = `cc003-turn-${i}-${ridx}`;
+          const inbound: OpenCapsuleInput = {
             channel: "web",
             customerId: `cc003-cust-${i % 5}`,
-            conversationId: `cc003-conv-${i % 5}`,
-            text,
-            receivedAt: "2026-05-18T00:00:00.000Z",
-          },
-        };
-        let capsule;
-        try {
-          capsule = await conductor.openCapsule(inbound);
-        } catch {
-          continue;
+            inbound: {
+              channel: "web",
+              customerId: `cc003-cust-${i % 5}`,
+              conversationId: `cc003-conv-${i % 5}`,
+              text,
+              receivedAt: "2026-05-18T00:00:00.000Z",
+            },
+          };
+          let capsule;
+          try {
+            capsule = await conductor.openCapsule(inbound);
+          } catch {
+            continue;
+          }
+          try {
+            await handleTurn(capsule, inbound.inbound);
+          } catch {
+            // turn errors are out of scope for CC-003 — they're CC-002 / CC-004 territory
+          }
+          await conductor.closeCapsule(capsule);
         }
-        try {
-          await handleTurn(capsule, inbound.inbound);
-        } catch {
-          // turn errors are out of scope for CC-003 — they're CC-002 / CC-004 territory
-        }
-        await conductor.closeCapsule(capsule);
-      }
-    } finally {
-      mutableTelemetry.emitLLMTrace = originalEmitLLMTrace;
-    }
+      },
+    );
 
     if (traces.length === 0) {
       return {

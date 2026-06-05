@@ -18,6 +18,7 @@
 import type { Decision, IntentEnvelope } from "@adjudicate/core";
 import type {
   Adjudicator,
+  ConfirmationReceipt,
   PolicyBundle,
   SystemState,
 } from "./ports/adjudicator.js";
@@ -28,7 +29,7 @@ import type { HandoffPort } from "./ports/handoff.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
 import type { ResponderPort } from "./ports/responder.js";
-import type { SessionPort } from "./ports/session.js";
+import type { Session, SessionPort } from "./ports/session.js";
 import type { TelemetryPort } from "./ports/telemetry.js";
 import type { TenantConfig } from "./ports/tenant.js";
 import type { Actor } from "./tools/types.js";
@@ -38,8 +39,14 @@ import type { ToolRegistry } from "./tools/registry.js";
  * A per-channel mapping of drivers, keyed by ChannelKind. Available on
  * the Capsule under `channels`. The runtime's `perceive` phase picks
  * the driver matching the inbound channel.
+ *
+ * Typed as `Partial<…>` so that TypeScript flags missing-key access at
+ * sites that index by a `ChannelKind` — the result is `ChannelDriver |
+ * undefined` and callers must guard before use.  Using the closed `ChannelKind`
+ * union (rather than `string`) prevents arbitrary string keys and preserves
+ * the exhaustive union check when new channel kinds are added.
  */
-export type ChannelMap = Readonly<Record<string, ChannelDriver>>;
+export type ChannelMap = Partial<Readonly<Record<ChannelKind, ChannelDriver>>>;
 
 export interface Capsule {
   // ── Identity ──────────────────────────────────────────────────────────────
@@ -67,6 +74,17 @@ export interface Capsule {
   readonly handoff: HandoffPort;
   readonly telemetry: TelemetryPort;
   readonly session: SessionPort;
+  /**
+   * The session snapshot loaded for THIS turn, bound at openCapsule time.
+   * This is the only handle to "the session this turn is acting on" — the
+   * SessionPort has no process-global `current()` accessor (its removal is
+   * the RC-R3 footgun fix: a "most recently loaded" accessor returned the
+   * wrong session under concurrent turns for different customers). Session-
+   * scoped port ops (`parkPendingConfirmation`/`parkDeferred`/`unpark`) are
+   * called with `loadedSession.id`. The Conductor holds a per-session lock
+   * for the turn's lifetime, so this snapshot is stable.
+   */
+  readonly loadedSession: Session;
 
   // ── Kernel-bound (resolved per turn by TenantResolver) ────────────────────
   readonly state: SystemState;
@@ -81,4 +99,18 @@ export interface Capsule {
    */
   adjudicate(envelope: IntentEnvelope): Promise<Decision>;
   adjudicatePlan(envelopes: ReadonlyArray<IntentEnvelope>): Promise<Decision>;
+
+  /**
+   * Forward to `adjudicator.resume(envelope, state, policy, receipt)` with the
+   * capsule's current (fresh, this-turn) state/policy pre-bound — so a resumed
+   * confirmation is re-adjudicated against the state it must still be safe
+   * against (money-safety). Present only when the adjudicator implements the
+   * optional `resume` verb; the resume branch in `handleTurn` guards on it and
+   * degrades to the normal loop when absent. The cognitive loop calls this in
+   * place of `adjudicate` when an inbound reply resumes a parked envelope.
+   */
+  resume?(
+    envelope: IntentEnvelope,
+    receipt?: ConfirmationReceipt,
+  ): Promise<Decision>;
 }

@@ -47,3 +47,6 @@ export const TTL_SECONDS = {
   /** Episodic turn TTL — long enough for replay-protection within a session. */
   episodicTurn: 3600,
 } as const;
+
+/** Shape of TTL overrides that can be passed to `PostgresMemoryProviderDeps.ttls`. */
+export type TtlConfig = typeof TTL_SECONDS;

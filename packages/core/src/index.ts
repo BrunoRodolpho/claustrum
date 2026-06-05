@@ -19,6 +19,13 @@ export { handleTurn, type TurnResult } from "./handle-turn.js";
 // ── Dispatch ───────────────────────────────────────────────────────────────
 export { dispatchDecision, type DispatchResult } from "./execution/dispatch.js";
 
+// ── Retry / backoff (consumes CompletionError.retryAfterMs) ─────────────────
+export {
+  retryWithBackoff,
+  computeRetryDelayMs,
+  type RetryOptions,
+} from "./execution/retry.js";
+
 // ── Ports ──────────────────────────────────────────────────────────────────
 export type {
   ModelProvider,
@@ -54,7 +61,21 @@ export type {
   RenderedResponse,
   SignedEnvelope,
   ChannelKind,
+  ChannelArtifact,
+  RecipientArtifact,
+  ParkedMatch,
+  UserResolution,
 } from "./ports/channel.js";
+export { isRecipientArtifact } from "./ports/channel.js";
+
+export type {
+  GatewayKeyProvider,
+  GatewaySigningKey,
+} from "./gateway-attestation.js";
+export {
+  resolveGatewaySigningKey,
+  verifyGatewayAttestation,
+} from "./gateway-attestation.js";
 
 export type { PlannerPort, Plan, CognitiveState } from "./ports/planner.js";
 export type {
@@ -72,12 +93,18 @@ export type {
   WorkingMemoryFrame,
   Goal,
 } from "./ports/session.js";
+export type { SessionLock, SessionLockHandle } from "./ports/session-lock.js";
 export type {
   TelemetryPort,
   LLMTrace,
   TurnRecord,
   MemoryAccess,
 } from "./ports/telemetry.js";
+export {
+  TELEMETRY_SCHEMA_VERSION,
+  boundLLMTrace,
+  type LLMTraceBudget,
+} from "./telemetry-bounds.js";
 export type {
   Adjudicator,
   SystemState,
@@ -85,6 +112,7 @@ export type {
   OutcomeFilter,
   OutcomeRow,
   AuditVerification,
+  ConfirmationReceipt,
 } from "./ports/adjudicator.js";
 export type {
   FewShotIndex,
@@ -107,6 +135,7 @@ export type {
   Actor,
   ActorRole,
 } from "./tools/types.js";
+export { asCapability, isWellFormedCapability } from "./tools/types.js";
 export { createToolRegistry, type ToolRegistry } from "./tools/registry.js";
 
 // ── Prompting ──────────────────────────────────────────────────────────────

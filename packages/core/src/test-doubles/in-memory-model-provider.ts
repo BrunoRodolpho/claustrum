@@ -49,6 +49,9 @@ export class InMemoryModelProvider implements ModelProvider {
     this.seen.push(req);
     const next = this.completions[this.completionCursor % this.completions.length];
     this.completionCursor += 1;
+    if (next === undefined) {
+      throw new Error("InMemoryModelProvider: no completions configured");
+    }
     return next;
   }
 
@@ -57,11 +60,17 @@ export class InMemoryModelProvider implements ModelProvider {
     const completion =
       this.completions[this.completionCursor % this.completions.length];
     this.completionCursor += 1;
+    if (completion === undefined) {
+      throw new Error("InMemoryModelProvider: no completions configured");
+    }
+    // Re-bind with an explicit type: TS control-flow narrowing from the guard
+    // above does not propagate into the nested gen() generator closure.
+    const active: Completion = completion;
     let aborted = false;
 
     async function* gen(): AsyncIterator<CompletionChunk> {
-      if (completion.text.length > 0) {
-        yield { type: "text_delta", text: completion.text };
+      if (active.text.length > 0) {
+        yield { type: "text_delta", text: active.text };
       }
       if (aborted) {
         yield { type: "cancelled" };
@@ -69,9 +78,9 @@ export class InMemoryModelProvider implements ModelProvider {
       }
       yield {
         type: "done",
-        stopReason: completion.stopReason,
-        inputTokens: completion.inputTokens,
-        outputTokens: completion.outputTokens,
+        stopReason: active.stopReason,
+        inputTokens: active.inputTokens,
+        outputTokens: active.outputTokens,
       };
     }
 

@@ -24,16 +24,26 @@ import type {
   Session,
   SignedEnvelope,
 } from "@claustrum/core";
+import { isRecipientArtifact, resolveGatewaySigningKey } from "@claustrum/core";
 import type { IntentEnvelope } from "@adjudicate/core";
 import { attestWithGatewayKey } from "./attest.js";
 import { matchToParkedByReply } from "./parked-match.js";
 import { perceiveTwilioWebhook } from "./perceive.js";
 import { sendTwilioMessage, splitForWhatsApp } from "./render.js";
+import { verifyTwilioSignature } from "./twilio-signature.js";
 import type {
   ParkedMatch,
-  TwilioWebhookBody,
+  TwilioInboundRequest,
   WhatsAppChannelConfig,
 } from "./types.js";
+
+/** Thrown when an inbound webhook fails Twilio signature verification. The webhook route maps this to HTTP 403. */
+export class TwilioVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TwilioVerificationError";
+  }
+}
 
 const DEFAULT_INTER_CHUNK_MS = 200;
 
@@ -44,15 +54,56 @@ export class WhatsAppChannel implements ChannelDriver {
     if (!config.accountSid) throw new Error("WhatsAppChannel: accountSid required");
     if (!config.authToken) throw new Error("WhatsAppChannel: authToken required");
     if (!config.twilioFrom) throw new Error("WhatsAppChannel: twilioFrom required");
-    if (!config.gatewaySigningKey)
+    // Resolve to validate: catches both a missing key and a `{current:""}`
+    // provider that the old truthy-check on the object would have let through.
+    try {
+      resolveGatewaySigningKey(config.gatewaySigningKey);
+    } catch {
       throw new Error("WhatsAppChannel: gatewaySigningKey required");
+    }
   }
 
+  /**
+   * Verify the inbound Twilio signature, THEN normalize to a ChannelMessage.
+   *
+   * RC-R2 / Decision 2: verification is mandatory and fail-closed. `raw` MUST
+   * be a {@link TwilioInboundRequest} (url + X-Twilio-Signature + parsed body)
+   * forwarded by the thin webhook route. Without that context — or with a
+   * signature that does not match an HMAC-SHA1 over the canonical Twilio string
+   * keyed by the account auth token — the request is rejected with
+   * {@link TwilioVerificationError} and never normalized-and-adjudicated. This
+   * is the only thing standing between "any party that can POST a webhook" and
+   * a kernel-adjudicated mutation.
+   */
   async perceive(raw: unknown): Promise<ChannelMessage> {
     if (raw === null || typeof raw !== "object") {
-      throw new Error("WhatsAppChannel.perceive: raw must be an object");
+      throw new TwilioVerificationError(
+        "WhatsAppChannel.perceive: raw must be a TwilioInboundRequest { url, signature, body }",
+      );
     }
-    return perceiveTwilioWebhook(raw as TwilioWebhookBody);
+    const req = raw as Partial<TwilioInboundRequest>;
+    if (
+      typeof req.url !== "string" ||
+      typeof req.signature !== "string" ||
+      req.body === null ||
+      typeof req.body !== "object"
+    ) {
+      throw new TwilioVerificationError(
+        "WhatsAppChannel.perceive: missing verification context (url, signature, body); forward the raw Twilio request from the webhook route",
+      );
+    }
+    const verified = verifyTwilioSignature({
+      authToken: this.config.authToken,
+      signature: req.signature,
+      url: req.url,
+      params: req.body,
+    });
+    if (!verified) {
+      throw new TwilioVerificationError(
+        "WhatsAppChannel.perceive: Twilio signature verification failed",
+      );
+    }
+    return perceiveTwilioWebhook(req.body);
   }
 
   async render(response: RenderedResponse): Promise<void> {
@@ -73,13 +124,13 @@ export class WhatsAppChannel implements ChannelDriver {
     }
 
     const delay = this.config.interChunkDelayMs ?? DEFAULT_INTER_CHUNK_MS;
-    for (let i = 0; i < chunks.length; i++) {
+    for (const [i, body] of chunks.entries()) {
       await sendTwilioMessage({
         accountSid: this.config.accountSid,
         authToken: this.config.authToken,
         from: this.config.twilioFrom,
         to,
-        body: chunks[i],
+        body,
         ...(this.config.fetch !== undefined ? { fetch: this.config.fetch } : {}),
       });
       if (i < chunks.length - 1) {
@@ -117,13 +168,11 @@ export class WhatsAppChannel implements ChannelDriver {
 function extractRecipient(response: RenderedResponse): string | null {
   if (!response.artifacts) return null;
   for (const artifact of response.artifacts) {
-    if (
-      artifact &&
-      typeof artifact === "object" &&
-      "to" in (artifact as Record<string, unknown>) &&
-      typeof (artifact as { to?: unknown }).to === "string"
-    ) {
-      return (artifact as { to: string }).to;
+    // Typed narrowing (APIReviewer-018): `isRecipientArtifact` proves the
+    // `to: string` shape, so `artifact.to` is a checked access — a missing or
+    // non-string `to` is a guarded skip, never an unchecked cast that throws.
+    if (isRecipientArtifact(artifact)) {
+      return artifact.to;
     }
   }
   return null;

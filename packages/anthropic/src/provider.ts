@@ -115,6 +115,32 @@ export interface AnthropicMessageStream extends AsyncIterable<AnthropicStreamEve
   finalMessage(): Promise<AnthropicMessageResponse>;
 }
 
+// ── SDK wrapper helper ─────────────────────────────────────────────────────
+
+/**
+ * Wraps a real `@anthropic-ai/sdk` `Anthropic` instance so it satisfies
+ * `AnthropicClientLike` without any cast in user code.
+ *
+ * The SDK narrows the `stream` field in its overloaded `create()` signature
+ * (which differs from this adapter's broader `boolean | undefined` body type),
+ * causing TypeScript to reject a direct assignment.  This helper centralises
+ * the one `unknown` coercion here so adopters can write:
+ *
+ * ```ts
+ * import Anthropic from "@anthropic-ai/sdk";
+ * import { wrapAnthropicSdk, AnthropicProvider } from "@claustrum/anthropic";
+ *
+ * const client = wrapAnthropicSdk(new Anthropic({ apiKey }));
+ * const provider = new AnthropicProvider({ client });
+ * ```
+ *
+ * @param sdk - Any object whose structural shape satisfies the SDK surface
+ *   we consume (real SDK or a compatible fake).
+ */
+export function wrapAnthropicSdk(sdk: unknown): AnthropicClientLike {
+  return sdk as AnthropicClientLike;
+}
+
 // ── Options ────────────────────────────────────────────────────────────────
 
 export interface AnthropicProviderOptions {
@@ -129,6 +155,22 @@ export interface AnthropicProviderOptions {
    * Without a proxy, `embed()` throws `not_implemented`.
    */
   readonly embedding?: { readonly proxy: ModelProvider };
+  /**
+   * Fallback value for `max_tokens` when a CompletionRequest omits
+   * `maxTokens`.  Defaults to 1024 for back-compat.  Adopters can raise
+   * this (e.g. 4096) to avoid silent truncation on long responses
+   * (ConfigReviewer-006).
+   */
+  readonly defaultMaxTokens?: number;
+  /**
+   * Optional structured-log hook for non-fatal provider warnings (currently the
+   * `max_tokens` fallback in `toCreateBody`). Adopters wire their logger so the
+   * warning lands in their structured/queryable store (e.g. ibatexas passes its
+   * pino logger). Without it the provider falls back to `console.warn`
+   * (back-compat). This is a caller-supplied callback, not a dependency on
+   * another package — it stays within the adapter boundary.
+   */
+  readonly onWarn?: (message: string, fields: Record<string, unknown>) => void;
 }
 
 // ── Stop-reason normalization ──────────────────────────────────────────────
@@ -159,9 +201,13 @@ function normalizeStopReason(raw: string | null | undefined): StopReason {
 export class AnthropicProvider implements ModelProvider {
   private readonly client: AnthropicClientLike;
   private readonly embeddingProxy?: ModelProvider;
+  private readonly defaultMaxTokens: number;
+  private readonly onWarn?: (message: string, fields: Record<string, unknown>) => void;
 
   constructor(options: AnthropicProviderOptions) {
     this.client = options.client;
+    this.defaultMaxTokens = options.defaultMaxTokens ?? 1024;
+    this.onWarn = options.onWarn;
     if (options.embedding !== undefined) {
       this.embeddingProxy = options.embedding.proxy;
     }
@@ -190,6 +236,15 @@ export class AnthropicProvider implements ModelProvider {
     });
 
     async function* generate(): AsyncIterator<CompletionChunk> {
+      // Accumulate token counts as the stream progresses. Anthropic delivers
+      // authoritative usage on finalMessage(); on cancel we attempt to call
+      // it (succeeds if message_stop already arrived) so partial spend is
+      // visible to callers rather than silently dropped (NetworkReviewer-006).
+      // Declared outside try/catch so both the abort-break path and the
+      // SDK-throw-abort path (catch) can access them.
+      let runningInputTokens = 0;
+      let runningOutputTokens = 0;
+
       try {
         // Track which content_blocks are tool_use by index so input deltas
         // can be routed to the right toolUseId.
@@ -238,7 +293,23 @@ export class AnthropicProvider implements ModelProvider {
         }
 
         if (aborted) {
-          yield { type: "cancelled" };
+          // Attempt to retrieve usage from finalMessage() — the SDK may have
+          // already received the full response metadata even if we aborted
+          // mid-content-stream.  On genuine mid-stream abort the call throws;
+          // we catch and carry whatever running counts we have so callers see
+          // partial spend rather than nothing (NetworkReviewer-006).
+          try {
+            const partialMsg = await sdkStream.finalMessage();
+            runningInputTokens = partialMsg.usage?.input_tokens ?? runningInputTokens;
+            runningOutputTokens = partialMsg.usage?.output_tokens ?? runningOutputTokens;
+          } catch {
+            // Abort before message_stop — usage unavailable; carry zeros.
+          }
+          yield {
+            type: "cancelled",
+            inputTokens: runningInputTokens,
+            outputTokens: runningOutputTokens,
+          };
           return;
         }
 
@@ -252,7 +323,23 @@ export class AnthropicProvider implements ModelProvider {
       } catch (err) {
         const translated = translateAnthropicError(err);
         if (translated.code === "cancelled") {
-          yield { type: "cancelled" };
+          // SDK threw an abort error mid-stream (typical path: the iterator
+          // throws APIUserAbortError on the next read after sdkStream.abort()).
+          // Attempt to retrieve usage from finalMessage() — it may succeed if
+          // the SDK received message_stop before the socket was severed.
+          // On failure carry whatever running counts we have (NetworkReviewer-006).
+          try {
+            const partialMsg = await sdkStream.finalMessage();
+            runningInputTokens = partialMsg.usage?.input_tokens ?? runningInputTokens;
+            runningOutputTokens = partialMsg.usage?.output_tokens ?? runningOutputTokens;
+          } catch {
+            // Abort before message_stop — usage unavailable; carry zeros.
+          }
+          yield {
+            type: "cancelled",
+            inputTokens: runningInputTokens,
+            outputTokens: runningOutputTokens,
+          };
           return;
         }
         throw translated;
@@ -310,9 +397,30 @@ export class AnthropicProvider implements ModelProvider {
       content: m.content,
     }));
 
+    if (req.maxTokens === undefined) {
+      // Surface the fallback at warn-level so operators can raise
+      // defaultMaxTokens if needed (ConfigReviewer-006 — silent 1024 truncation).
+      // Through the injected onWarn hook it reaches the adopter's structured log
+      // store (component:"claustrum:anthropic"); without one it falls back to
+      // console.warn (back-compat).
+      const message =
+        `max_tokens not set on request for model ${req.model}; ` +
+        `using defaultMaxTokens=${this.defaultMaxTokens}. ` +
+        `Raise AnthropicProviderOptions.defaultMaxTokens to avoid silent truncation.`;
+      if (this.onWarn) {
+        this.onWarn(message, {
+          component: "claustrum:anthropic",
+          event: "max_tokens_fallback",
+          model: req.model,
+          defaultMaxTokens: this.defaultMaxTokens,
+        });
+      } else {
+        console.warn(`[AnthropicProvider] ${message}`);
+      }
+    }
     const body: AnthropicMessagesCreateBody = {
       model: req.model,
-      max_tokens: req.maxTokens ?? 1024,
+      max_tokens: req.maxTokens ?? this.defaultMaxTokens,
       messages,
       ...(req.system !== undefined ? { system: req.system } : {}),
       ...(req.tools !== undefined

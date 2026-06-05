@@ -113,6 +113,9 @@ export function translateAnthropicError(err: unknown): CompletionError {
 
   if (typeof status === "number") {
     if (status === 429) {
+      // `retryAfterMs` is consumed by `retryWithBackoff` from @claustrum/core
+      // (NetworkReviewer-011). Wiring that helper into `complete()` here is a
+      // tracked follow-up — the helper is landed and unit-tested in core.
       const retryAfterMs = parseRetryAfterMs(
         getHeader(shape.headers, "retry-after"),
       );

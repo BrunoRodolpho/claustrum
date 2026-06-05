@@ -12,6 +12,7 @@
 import { createHmac } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { buildEnvelope, canonicalJson } from "@adjudicate/core";
+import { verifyGatewayAttestation } from "@claustrum/core";
 import { attestWithGatewayKey } from "../src/attest.js";
 
 const SIGNING_KEY = "gateway-secret-key-32-chars-deadbeef";
@@ -122,6 +123,53 @@ describe("attestWithGatewayKey", () => {
     const env = makeEnvelope();
     await expect(
       attestWithGatewayKey(env, "", { channel: "whatsapp", gateway: "wa:+1" }),
+    ).rejects.toThrow(/empty signing key/);
+  });
+});
+
+// AuthReviewer-010: attest accepts a {current, previous} provider, signs with
+// `current`, and the signature verifies via verifyGatewayAttestation against the
+// current OR previous key — the rollover overlap.
+describe("attestWithGatewayKey — key rotation provider", () => {
+  it("signs with the provider's current key (verifies under current)", async () => {
+    const env = makeEnvelope();
+    const signed = await attestWithGatewayKey(
+      env,
+      { current: "new-key", previous: "old-key" },
+      { channel: "whatsapp", gateway: "wa:+1" },
+    );
+    // Bit-identical to signing with the bare current key.
+    const expected = createHmac("sha256", "new-key")
+      .update(canonicalJson(signed.envelope), "utf8")
+      .digest("hex");
+    expect(signed.signature).toBe(expected);
+    expect(verifyGatewayAttestation(signed, { current: "new-key", previous: "old-key" })).toBe(true);
+  });
+
+  it("an envelope signed BEFORE rotation still verifies after (previous key honored)", async () => {
+    const env = makeEnvelope();
+    // Signed while "old-key" was current (bare string).
+    const signedBeforeRotation = await attestWithGatewayKey(env, "old-key", {
+      channel: "whatsapp",
+      gateway: "wa:+1",
+    });
+    // After rotation the live provider is {current:"new-key", previous:"old-key"}.
+    expect(
+      verifyGatewayAttestation(signedBeforeRotation, {
+        current: "new-key",
+        previous: "old-key",
+      }),
+    ).toBe(true);
+    // …and once "old-key" ages out of the provider, it no longer verifies.
+    expect(
+      verifyGatewayAttestation(signedBeforeRotation, { current: "new-key" }),
+    ).toBe(false);
+  });
+
+  it("rejects a provider whose current key is empty", async () => {
+    const env = makeEnvelope();
+    await expect(
+      attestWithGatewayKey(env, { current: "" }, { channel: "whatsapp", gateway: "wa:+1" }),
     ).rejects.toThrow(/empty signing key/);
   });
 });

@@ -38,6 +38,17 @@ export interface FewShotExample {
   readonly embedding?: ReadonlyArray<number>;
 }
 
+/**
+ * Query shape for `FewShotIndex.select`.
+ *
+ * Note on query-shape divergence: this interface is intentionally
+ * different from `MemoryPort.search`'s inline query object (see
+ * `ports/memory.ts`). The two ports serve distinct retrieval concerns —
+ * indexed exemplars vs. episodic/semantic memory — and are not meant to
+ * share a unified query shape. Here `tenant` is an optional filter field
+ * alongside intent/risk/channel dimensions; in `MemoryPort.search`,
+ * the customer scope is a first-class positional argument.
+ */
 export interface FewShotQuery {
   readonly intentKind?: string;
   readonly riskScore?: number;
