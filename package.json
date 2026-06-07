@@ -27,12 +27,5 @@
     "node": ">=20.0.0",
     "pnpm": ">=10.0.0"
   },
-  "packageManager": "pnpm@10.32.1",
-  "pnpm": {
-    "overrides": {
-      "@adjudicate/core": "workspace:*",
-      "@adjudicate/runtime": "workspace:*",
-      "@adjudicate/canonical": "workspace:*"
-    }
-  }
+  "packageManager": "pnpm@10.32.1"
 }
