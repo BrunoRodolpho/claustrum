@@ -31,6 +31,14 @@ export interface TurnRecord {
   readonly decisionKind?: string;
   readonly intentHash?: string;
   readonly auditHash?: string;
+  /**
+   * Total model token usage for the turn (cost accounting, F4). Summed by
+   * `handleTurn` from `plan.usage` + `draft.usage`. Optional + additive:
+   * absent on pre-versioned records and when no planner/responder reported
+   * usage. LLM-trace retention is separate from the audit ledger.
+   */
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
   readonly durationMs: number;
   readonly at: string;
   readonly error?: { readonly code: string; readonly message: string };

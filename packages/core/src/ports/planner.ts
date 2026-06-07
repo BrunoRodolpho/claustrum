@@ -33,6 +33,12 @@ export interface CognitiveState {
   readonly turnId: string;
 }
 
+/** Model token usage for one phase (planning or synthesis). Cost accounting (F4). */
+export interface TokenUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
 export interface Plan {
   /**
    * One or more proposed envelopes. `handleTurn` routes by length:
@@ -49,6 +55,14 @@ export interface Plan {
     readonly name: string;
     readonly input: unknown;
   }>;
+  /**
+   * Token usage of the model call(s) this planner made (cost accounting, F4).
+   * Optional + additive: a planner that doesn't report it leaves it undefined
+   * and the loop folds 0. `handleTurn` sums `plan.usage` + `draft.usage` onto
+   * the `TurnRecord` so an adopter can meter per-session/customer spend off a
+   * single authoritative seam (the once-per-turn `emitTurn`).
+   */
+  readonly usage?: TokenUsage;
 }
 
 export interface PlannerPort {

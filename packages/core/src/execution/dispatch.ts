@@ -298,7 +298,7 @@ export async function dispatchDecision(
 }
 
 /** User-safe fallback when the explainer itself throws while rendering a REFUSE. */
-const GENERIC_REFUSAL_TEXT =
+export const GENERIC_REFUSAL_TEXT =
   "I can't complete that request right now. Please try again or rephrase.";
 
 function pickEnvelope(plan: Plan): IntentEnvelope | undefined {
