@@ -21,6 +21,7 @@
 
 import type { AuditRecord, Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule } from "./capsule.js";
+import type { SystemState } from "./ports/adjudicator.js";
 import {
   dispatchDecision,
   GENERIC_REFUSAL_TEXT,
@@ -100,6 +101,24 @@ export async function handleTurn(
     // 3. PLAN — propose envelopes. NO mutations yet.
     plan = await capsule.planner.propose(cognition);
 
+    // 3b. RESOLVE (optional) — turn the planner's (possibly natural-language)
+    //     envelopes into RESOLVED envelopes + a per-envelope assembled
+    //     SystemState, BEFORE adjudication. The resolved envelopes replace
+    //     plan.envelopes so they are what gets adjudicated, dispatched, AND
+    //     audited (audited == executed). Read-only. When no resolver is wired
+    //     the plan is adjudicated as-is against resolution.state (legacy).
+    let perEnvelopeStates: ReadonlyArray<SystemState> | undefined;
+    if (capsule.resolver !== undefined && plan.envelopes.length > 0) {
+      const resolved = await capsule.resolver.resolve({
+        plan,
+        cognition,
+        customerId: capsule.customerId,
+        channel: capsule.channel,
+      });
+      plan = { ...plan, envelopes: resolved.map((r) => r.envelope) };
+      perEnvelopeStates = resolved.map((r) => r.state);
+    }
+
     // 4. SUBMIT — adjudicate exactly once per turn.
     //    Single envelope -> adjudicate(); zero or multiple envelopes ->
     //    adjudicatePlan(). An empty plan is NOT short-circuited: it is
@@ -110,9 +129,9 @@ export async function handleTurn(
     //    basis, allowing downstream code to synthesize a response.
     const firstEnvelope = plan.envelopes[0];
     if (plan.envelopes.length === 1 && firstEnvelope !== undefined) {
-      decision = await capsule.adjudicate(firstEnvelope);
+      decision = await capsule.adjudicate(firstEnvelope, perEnvelopeStates?.[0]);
     } else {
-      decision = await capsule.adjudicatePlan(plan.envelopes);
+      decision = await capsule.adjudicatePlan(plan.envelopes, perEnvelopeStates);
     }
   }
 

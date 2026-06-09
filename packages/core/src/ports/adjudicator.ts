@@ -138,11 +138,20 @@ export interface Adjudicator {
     receipt?: ConfirmationReceipt,
   ): Promise<Decision>;
 
-  /** Multi-envelope (transactional) adjudication — atomic kill-all-or-execute-all. */
+  /**
+   * Multi-envelope (transactional) adjudication — atomic kill-all-or-execute-all.
+   *
+   * `perEnvelopeStates` (optional, resolve-stage): when the pre-adjudication
+   * {@link ResolverPort} assembles a distinct `SystemState` per envelope, the loop
+   * passes them order-aligned with `envelopes`; the adopter's implementation
+   * adjudicates `envelopes[i]` against `perEnvelopeStates[i] ?? state`. Omitted
+   * (the common single-state case) → every envelope uses `state`.
+   */
   adjudicatePlan(
     envelopes: ReadonlyArray<IntentEnvelope>,
     state: SystemState,
     policy: PolicyBundle,
+    perEnvelopeStates?: ReadonlyArray<SystemState>,
   ): Promise<Decision>;
 
   /**

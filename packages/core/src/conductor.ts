@@ -16,13 +16,18 @@
 import { randomUUID } from "node:crypto";
 import type { Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule, ChannelMap } from "./capsule.js";
-import type { Adjudicator, ConfirmationReceipt } from "./ports/adjudicator.js";
+import type {
+  Adjudicator,
+  ConfirmationReceipt,
+  SystemState,
+} from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind, ChannelMessage } from "./ports/channel.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
+import type { ResolverPort } from "./ports/resolver.js";
 import type { ResponderPort } from "./ports/responder.js";
 import type { SessionPort } from "./ports/session.js";
 import type { SessionLock, SessionLockHandle } from "./ports/session-lock.js";
@@ -45,6 +50,12 @@ export interface ConductorOptions {
   readonly tools: ToolRegistry;
   readonly channels: ReadonlyArray<ChannelDriver>;
   readonly tenantResolver: TenantResolver;
+  /**
+   * Optional pre-adjudication resolve stage (plan → resolve → adjudicate). When
+   * wired, `handleTurn` runs it to resolve envelope payloads + assemble per-
+   * envelope state before the kernel adjudicates. Absent → legacy behavior.
+   */
+  readonly resolver?: ResolverPort;
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
   /**
@@ -161,6 +172,9 @@ export function createConductor(options: ConductorOptions): Conductor {
         memory: options.memory,
         grounding: options.grounding,
         planner: options.planner,
+        ...(options.resolver !== undefined
+          ? { resolver: options.resolver }
+          : {}),
         tools: options.tools,
         channels,
         responder: options.responder,
@@ -172,20 +186,28 @@ export function createConductor(options: ConductorOptions): Conductor {
         loadedSession: session,
         state: resolution.state,
         policy: resolution.policy,
-        adjudicate(envelope: IntentEnvelope): Promise<Decision> {
+        adjudicate(
+          envelope: IntentEnvelope,
+          stateOverride?: SystemState,
+        ): Promise<Decision> {
+          // The resolve stage may supply a per-envelope SystemState; when present
+          // it supersedes this turn's resolution.state (which the kernel would
+          // otherwise adjudicate the resolved envelope against).
           return options.adjudicator.adjudicate(
             envelope,
-            resolution.state,
+            stateOverride ?? resolution.state,
             resolution.policy,
           );
         },
         adjudicatePlan(
           envelopes: ReadonlyArray<IntentEnvelope>,
+          perEnvelopeStates?: ReadonlyArray<SystemState>,
         ): Promise<Decision> {
           return options.adjudicator.adjudicatePlan(
             envelopes,
             resolution.state,
             resolution.policy,
+            perEnvelopeStates,
           );
         },
         // Wire `resume` only when the adjudicator implements the optional verb.
