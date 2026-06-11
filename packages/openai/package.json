@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/openai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ModelProvider adapter for the OpenAI Chat Completions API. Streaming-cancellable, tool-args stitched, error-translated, with native embeddings.",
   "license": "MIT",
   "type": "module",
@@ -23,7 +23,7 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@claustrum/core": "workspace:^0.1.0",
+    "@claustrum/core": "workspace:^",
     "openai": "^4.77.0"
   },
   "devDependencies": {

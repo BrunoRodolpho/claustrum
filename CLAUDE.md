@@ -27,17 +27,23 @@
 
 2. **`Capsule` is the per-turn handle, NOT `RuntimeContext`.** This is a name-collision hazard worth surfacing explicitly. `@adjudicate/core` exports a type called `RuntimeContext` — that is the **kernel-side per-tenant container** (residency policy, audit sink configuration, multi-tenant boundary). claustrum's per-turn handle is `Capsule` — short-lived, scoped to one conversational turn, contains all ports the cognitive loop needs (`memory`, `grounding`, `planner`, `responder`, `adjudicator`, `session`, `telemetry`, etc.). When reviewing PRs, if you see `ctx.adjudicate(...)` ask: is `ctx` a `Capsule` (runtime) or a `RuntimeContext` (kernel)? They serve different layers; conflating them is a category error.
 
-3. **The cognitive loop is invariant.** `perceive → understand → plan → submit → act → synthesize → observe`. `adjudicate()` is called **exactly once per turn** (or `adjudicatePlan()` for multi-step). The runtime never mutates state without a positive Decision. Every `Decision` variant has a defined handler — `EXECUTE`, `REFUSE`, `DEFER`, `ESCALATE`, `REQUEST_CONFIRMATION`, `REWRITE` — no throws.
+3. **The cognitive loop is invariant.** `perceive → understand → plan → [resolve] → submit → act → synthesize → [output-firewall] → observe`. The bracketed stages are optional and gated:
+   - **resolve** (`handle-turn.ts` step 3b, runs only when `capsule.resolver !== undefined`): a read-only pre-adjudication stage that turns the planner's possibly natural-language envelopes into resolved envelopes + per-envelope `SystemState`, so domain guards adjudicate against real entity state. The resolved envelopes are what get adjudicated, dispatched, AND audited.
+   - **output-firewall** (`handle-turn.ts` step 6b, runs only when the tenant flag `enable_output_adjudication` is on AND `adjudicator.adjudicateOutput` is wired): gates the synthesized draft through the kernel. It is an OUTPUT verb (does NOT call `adjudicate()`, so the once-per-turn invariant holds) and fails CLOSED — any non-EXECUTE verdict or throw renders a refusal instead of the un-vetted draft.
 
-4. **The 13 ports are conceptual boundaries, not just types.** Every adapter package implements one or more ports. Authoritative names are the exported types in `packages/core/src/index.ts` (`// ── Ports ──` section):
+   `adjudicate()` is called **exactly once per turn** (or `adjudicatePlan()` for multi-step). The runtime never mutates state without a positive Decision. Every `Decision` variant has a defined handler — `EXECUTE`, `REFUSE`, `DEFER`, `ESCALATE`, `REQUEST_CONFIRMATION`, `REWRITE` — no throws.
+
+4. **The ports are conceptual boundaries, not just types.** Every adapter package implements one or more ports. Authoritative names are the exported types in `packages/core/src/index.ts` (`// ── Ports ──` section) — 14 conceptual ports across 15 port files:
    - `ModelProvider` — LLM completion + streaming + embedding
-   - `MemoryPort` — episodic/semantic recall; `recentActions()` reads kernel ledger via `Adjudicator.replayEnvelopesByCustomerId` (NEVER raw SQL into `intent_audit`)
+   - `MemoryPort` — episodic/semantic recall; reads the kernel ledger via `Adjudicator.replayEnvelopesByCustomerId` (NEVER raw SQL into `intent_audit`)
    - `GroundingPort` — RAG + grounding-proof generation
    - `ChannelDriver` — `perceive`/`render`/`attest`; long-lived session resumption via `matchToParked(channelEvent, session)`
-   - `FewShotIndex` — indexed retrieval of conversation exemplars; gold outcomes include expected `Decision`
-   - `SessionPort` — persist `Session` across turns, including parked envelopes
+   - `FewShotIndex` — indexed retrieval of conversation exemplars; `goldOutcome` carries the expected `Decision` (the regression oracle)
+   - `SessionPort` — persist `Session` across turns, including parked/deferred envelopes
+   - `SessionLock` — per-session mutual exclusion held for a turn's lifetime (see `session-lock.ts`)
    - `TelemetryPort` — `emitTurn`, `emitLLMTrace`, `emitMemoryAccess`; LLM-trace storage is **separate retention** from the audit ledger
    - `PlannerPort` — proposes `IntentEnvelope[]` from `CognitiveState`
+   - `ResolverPort` — **OPTIONAL** read-only pre-adjudication resolve stage (see Rule #3 / `capsule.resolver`)
    - `ResponderPort` — generates user-facing response
    - `ExplainerPort` — renders refusal text via explain templates
    - `HandoffPort` — human escalation queue
@@ -48,7 +54,7 @@
 
 5. **Prompts are content-addressed graphs, not strings.** `PromptComposer` returns `{ system, messages, fewShots, fragmentManifest }`. The `fragmentManifest` is recorded in `LLMTrace` so months later you can replay an exact prompt by hash, even if live fragments have evolved.
 
-6. **The Adjudicator port is the only kernel surface the runtime uses.** Defined at `packages/core/src/ports/adjudicator.ts`. Exposes `adjudicate`, `adjudicatePlan`, optional `adjudicateOutput`, and the read APIs `replayEnvelopesByCustomerId`, `streamAuditByIntentHashPrefix`, `getOutcomes`, `verifyAuditRecord`. The runtime imports **nothing else** from `@adjudicate/core`. If you need additional kernel data, open an issue against adjudicate to expose a stable read API — do not reach into internals.
+6. **The Adjudicator port is the only kernel surface the runtime uses.** Defined at `packages/core/src/ports/adjudicator.ts`. Exposes `adjudicate`, `adjudicatePlan`, optional `resume` (re-adjudicate a parked confirmation/deferral — never dispatch-on-confirm), optional `adjudicateOutput` (the response firewall — now wired into the loop, see Rule #3), and the read APIs `replayEnvelopesByCustomerId`, `streamAuditByIntentHashPrefix`, `getOutcomes`, `verifyAuditRecord`. The runtime imports **nothing else** from `@adjudicate/core`. If you need additional kernel data, open an issue against adjudicate to expose a stable read API — do not reach into internals.
 
 7. **Tests** — property tests over the cognitive loop must include: "every envelope produced by the planner has `actor.principal` set", "the prompt manifest is included in every LLM trace", "every `EXECUTE` decision triggers exactly one tool invocation", "REFUSE always renders to user-facing text via explain templates", "LLM never sees a tool by its internal id". Iteration counts must be asserted (`N ≥ 100`). The probabilistic-runtime testing strategy is four layers: unit per port, golden conversation snapshots, replay against historical LLM traces, property tests on the loop.
 
@@ -64,7 +70,7 @@
 | Ports | PascalCase + `Port` suffix | `MemoryPort`, `GroundingPort` |
 | Adapters | PascalCase + `Provider` suffix | `AnthropicProvider`, `PgVectorGroundingProvider` |
 | Packages | `@claustrum/<kebab>` | `@claustrum/channel-whatsapp` |
-| Files | kebab-case | `channel-driver.ts`, `prompt-composer.ts` |
+| Files | kebab-case | `handle-turn.ts`, `session-lock.ts`, `fragment-registry.ts` |
 
 ---
 

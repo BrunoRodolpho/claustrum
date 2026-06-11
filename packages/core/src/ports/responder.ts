@@ -13,7 +13,7 @@
 
 import type { Decision } from "@adjudicate/core";
 import type { ChannelArtifact } from "./channel.js";
-import type { CognitiveState, Plan } from "./planner.js";
+import type { CognitiveState, Plan, TokenUsage } from "./planner.js";
 
 export interface DraftResponse {
   readonly text: string;
@@ -24,6 +24,11 @@ export interface DraftResponse {
    */
   readonly artifacts?: ReadonlyArray<ChannelArtifact>;
   readonly meta?: Record<string, unknown>;
+  /**
+   * Token usage of the synthesis model call (cost accounting, F4). Optional +
+   * additive; summed with `plan.usage` onto the TurnRecord by `handleTurn`.
+   */
+  readonly usage?: TokenUsage;
 }
 
 export interface OutputContext {

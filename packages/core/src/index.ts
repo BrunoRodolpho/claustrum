@@ -77,7 +77,17 @@ export {
   verifyGatewayAttestation,
 } from "./gateway-attestation.js";
 
-export type { PlannerPort, Plan, CognitiveState } from "./ports/planner.js";
+export type {
+  PlannerPort,
+  Plan,
+  CognitiveState,
+  TokenUsage,
+} from "./ports/planner.js";
+export type {
+  ResolverPort,
+  ResolvedEnvelope,
+  ResolverInput,
+} from "./ports/resolver.js";
 export type {
   ResponderPort,
   DraftResponse,

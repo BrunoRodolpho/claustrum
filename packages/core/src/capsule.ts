@@ -28,6 +28,7 @@ import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
+import type { ResolverPort } from "./ports/resolver.js";
 import type { ResponderPort } from "./ports/responder.js";
 import type { Session, SessionPort } from "./ports/session.js";
 import type { TelemetryPort } from "./ports/telemetry.js";
@@ -66,6 +67,13 @@ export interface Capsule {
   readonly memory: MemoryPort;
   readonly grounding: GroundingPort;
   readonly planner: PlannerPort;
+  /**
+   * Optional pre-adjudication resolve stage. When wired, `handleTurn` runs it
+   * between PLAN and SUBMIT to turn (possibly natural-language) envelopes into
+   * resolved envelopes + per-envelope assembled state. Absent → the plan is
+   * adjudicated as-is against `state`.
+   */
+  readonly resolver?: ResolverPort;
   readonly tools: ToolRegistry;
   readonly channels: ChannelMap;
   readonly responder: ResponderPort;
@@ -96,9 +104,19 @@ export interface Capsule {
    * the capsule's current state/policy pre-bound. The cognitive loop
    * calls this exactly once per turn (except for plans of length > 1,
    * which use `adjudicatePlan`).
+   *
+   * `stateOverride` (resolve-stage): the per-envelope `SystemState` the resolver
+   * assembled for this envelope. When provided it supersedes the turn's
+   * `resolution.state`; omitted → `resolution.state` is used (legacy behavior).
    */
-  adjudicate(envelope: IntentEnvelope): Promise<Decision>;
-  adjudicatePlan(envelopes: ReadonlyArray<IntentEnvelope>): Promise<Decision>;
+  adjudicate(
+    envelope: IntentEnvelope,
+    stateOverride?: SystemState,
+  ): Promise<Decision>;
+  adjudicatePlan(
+    envelopes: ReadonlyArray<IntentEnvelope>,
+    perEnvelopeStates?: ReadonlyArray<SystemState>,
+  ): Promise<Decision>;
 
   /**
    * Forward to `adjudicator.resume(envelope, state, policy, receipt)` with the

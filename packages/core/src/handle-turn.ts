@@ -21,11 +21,16 @@
 
 import type { AuditRecord, Decision, IntentEnvelope } from "@adjudicate/core";
 import type { Capsule } from "./capsule.js";
-import { dispatchDecision, type DispatchResult } from "./execution/dispatch.js";
+import type { SystemState } from "./ports/adjudicator.js";
+import {
+  dispatchDecision,
+  GENERIC_REFUSAL_TEXT,
+  type DispatchResult,
+} from "./execution/dispatch.js";
 import { TELEMETRY_SCHEMA_VERSION } from "./telemetry-bounds.js";
 import type { ChannelMessage, RenderedResponse } from "./ports/channel.js";
 import type { CognitiveState, Plan } from "./ports/planner.js";
-import type { DraftResponse } from "./ports/responder.js";
+import type { DraftResponse, OutputContext } from "./ports/responder.js";
 import type { DeferredEnvelope } from "./ports/session.js";
 
 export interface TurnResult {
@@ -96,6 +101,24 @@ export async function handleTurn(
     // 3. PLAN — propose envelopes. NO mutations yet.
     plan = await capsule.planner.propose(cognition);
 
+    // 3b. RESOLVE (optional) — turn the planner's (possibly natural-language)
+    //     envelopes into RESOLVED envelopes + a per-envelope assembled
+    //     SystemState, BEFORE adjudication. The resolved envelopes replace
+    //     plan.envelopes so they are what gets adjudicated, dispatched, AND
+    //     audited (audited == executed). Read-only. When no resolver is wired
+    //     the plan is adjudicated as-is against resolution.state (legacy).
+    let perEnvelopeStates: ReadonlyArray<SystemState> | undefined;
+    if (capsule.resolver !== undefined && plan.envelopes.length > 0) {
+      const resolved = await capsule.resolver.resolve({
+        plan,
+        cognition,
+        customerId: capsule.customerId,
+        channel: capsule.channel,
+      });
+      plan = { ...plan, envelopes: resolved.map((r) => r.envelope) };
+      perEnvelopeStates = resolved.map((r) => r.state);
+    }
+
     // 4. SUBMIT — adjudicate exactly once per turn.
     //    Single envelope -> adjudicate(); zero or multiple envelopes ->
     //    adjudicatePlan(). An empty plan is NOT short-circuited: it is
@@ -106,9 +129,9 @@ export async function handleTurn(
     //    basis, allowing downstream code to synthesize a response.
     const firstEnvelope = plan.envelopes[0];
     if (plan.envelopes.length === 1 && firstEnvelope !== undefined) {
-      decision = await capsule.adjudicate(firstEnvelope);
+      decision = await capsule.adjudicate(firstEnvelope, perEnvelopeStates?.[0]);
     } else {
-      decision = await capsule.adjudicatePlan(plan.envelopes);
+      decision = await capsule.adjudicatePlan(plan.envelopes, perEnvelopeStates);
     }
   }
 
@@ -136,17 +159,77 @@ export async function handleTurn(
       : {}),
   });
 
+  // 6b. OUTPUT FIREWALL (optional, F1) — gate the draft through the kernel when
+  //     the adopter wired `adjudicateOutput` AND the tenant flag is on. This is
+  //     an OUTPUT verb: it does NOT call `adjudicate()`, so the once-per-turn
+  //     invariant is preserved. Fail CLOSED — on a non-EXECUTE verdict OR a
+  //     throw, the un-vetted draft is NEVER emitted; a refusal is rendered
+  //     instead. (The adopter's impl carries the PII/content guard, e.g.
+  //     `createDataClassificationGuard` over the response text.)
+  let responseText = draft.text;
+  // True once the firewall blocks the draft — used to ALSO drop artifacts, so a
+  // blocked turn can't leak via a channel artifact what it scrubbed from text.
+  let outputBlocked = false;
+  if (
+    capsule.tenant.flags?.enable_output_adjudication === true &&
+    capsule.adjudicator.adjudicateOutput !== undefined
+  ) {
+    try {
+      const outputContext: OutputContext = {
+        cognition,
+        decision,
+        plan,
+        tenantId: capsule.tenant.tenantId,
+        turnId: capsule.turnId,
+      };
+      const outDecision = await capsule.adjudicator.adjudicateOutput(
+        draft,
+        outputContext,
+      );
+      if (outDecision.kind === "EXECUTE") {
+        // Allowed unchanged.
+      } else if (outDecision.kind === "REFUSE") {
+        const rendered = capsule.explainer.render(outDecision.refusal);
+        responseText = rendered.length > 0 ? rendered : GENERIC_REFUSAL_TEXT;
+        outputBlocked = true;
+      } else {
+        // Any other verdict on an OUTPUT is not a safe "allow" (the kernel's
+        // REWRITE carries an envelope, not response text; DEFER/ESCALATE/
+        // CONFIRM are nonsensical here) — block fail-safe.
+        responseText = GENERIC_REFUSAL_TEXT;
+        outputBlocked = true;
+      }
+    } catch {
+      // Firewall threw → never leak the un-vetted draft.
+      responseText = GENERIC_REFUSAL_TEXT;
+      outputBlocked = true;
+    }
+  }
+
   const response: RenderedResponse = {
     channel: capsule.channel,
     customerId: capsule.customerId,
     conversationId: capsule.conversationId,
-    text: draft.text,
-    ...(draft.artifacts !== undefined ? { artifacts: draft.artifacts } : {}),
+    text: responseText,
+    ...(draft.artifacts !== undefined && !outputBlocked
+      ? { artifacts: draft.artifacts }
+      : {}),
     meta: buildResponseMeta(acted),
   };
 
   const durationMs = Date.now() - startedAt;
   const intentHash = plan.envelopes[0]?.intentHash;
+
+  // Per-turn token usage = planning + synthesis model calls (cost accounting,
+  // F4). Summed onto the TurnRecord (the once-per-turn seam that also carries
+  // customerId) so an adopter can meter per-session spend off a single call.
+  // Undefined when neither phase reported usage — keep the fields off the record.
+  const inputTokens =
+    (plan.usage?.inputTokens ?? 0) + (draft.usage?.inputTokens ?? 0);
+  const outputTokens =
+    (plan.usage?.outputTokens ?? 0) + (draft.usage?.outputTokens ?? 0);
+  const usageFields =
+    inputTokens > 0 || outputTokens > 0 ? { inputTokens, outputTokens } : {};
 
   // 7. OBSERVE — fire-and-forget telemetry + memory observation.
   await Promise.all([
@@ -171,6 +254,7 @@ export async function handleTurn(
       responseText: response.text,
       decisionKind: decision.kind,
       ...(intentHash !== undefined ? { intentHash } : {}),
+      ...usageFields,
       durationMs,
       at: new Date().toISOString(),
     }),

@@ -2,7 +2,6 @@ packages:
   - "packages/*"
   - "examples/*"
   - "apps/*"
-  # Sibling adjudicate repo — the kernel. Linked so @adjudicate/* resolves to the
-  # live working tree (kernel fixes compose into the runtime) instead of a frozen
-  # snapshot. Post-publish this reverts to the registry ^1.1.0 ranges.
-  - "../adjudicate/packages/*"
+  # @adjudicate/* are consumed from the npm registry via each package's
+  # ^1.1.0 ranges (resolves the published 1.3.x). The previous sibling
+  # workspace link (../adjudicate/packages/*) was removed at the 1.3.0 cutover.

@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/channel-whatsapp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Twilio WhatsApp ChannelDriver adapter for @claustrum/core. Implements perceive/render/attest plus session-resume by intentHash.",
   "license": "MIT",
   "type": "module",
@@ -27,7 +27,7 @@
   },
   "peerDependencies": {
     "@adjudicate/core": "^1.1.0",
-    "@claustrum/core": "workspace:*"
+    "@claustrum/core": "workspace:^"
   },
   "devDependencies": {
     "@adjudicate/core": "^1.1.0",
