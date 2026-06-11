@@ -9,13 +9,14 @@
 > for brevity and are **illustrative, not normative**: do not copy their
 > client/pool wiring into production unchanged.
 
-This document covers the four operational surfaces the audit flagged as
+This document covers the five operational surfaces the audit flagged as
 under-documented:
 
 1. Model-provider SDK timeouts and retries.
 2. pgvector / Prisma connection pool sizing and `statement_timeout`.
 3. The `TenantResolver.resolve()` per-turn caching contract.
 4. Fragment-registry boundedness and per-replica replay.
+5. The Redis `SessionLock` implementation (UUID token + Lua release + heartbeat).
 
 ---
 
@@ -201,6 +202,43 @@ content**. Operationally:
 - For durable replay across deploys, archive the fragment catalogue (content +
   `id`) alongside your trace store, so a trace captured under an old fragment set
   can be reproduced even after the live catalogue moves on.
+
+---
+
+## 5. Redis `SessionLock` — UUID token, Lua release, and heartbeat
+
+The Conductor acquires a per-session lock (`${channel}:${customerId}`) in
+`openCapsule` and releases it in `closeCapsule` so same-session turns serialize —
+this is what keeps "`adjudicate()` exactly once per turn" true under retries,
+multi-tab clients, and multi-replica deploys (see
+`packages/core/src/ports/session-lock.ts`). The contract is **multi-process**, so
+the production implementation MUST be distributed: a Postgres advisory lock
+(`@claustrum/memory-postgres` `PostgresAdvisorySessionLock`) or Redis. If you
+implement the `SessionLock` port over Redis, hold these invariants:
+
+- **UUID token.** Store a per-acquire UUID as the lock value (not a constant).
+  Release and heartbeat are conditional on that token, so a process whose
+  heartbeat lapsed can never act on a lock another agent has since acquired.
+- **Lua conditional release.** Never `redis.del()` a lock unconditionally —
+  delete only if the value still equals our token, atomically:
+
+  ```lua
+  -- KEYS[1] = lock key, ARGV[1] = expected UUID token
+  if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+  else
+    return 0
+  end
+  ```
+
+  A plain `DEL` lets a stalled holder delete another agent's freshly-acquired
+  lock, cascading into the double-`adjudicate()` breach the lock exists to prevent.
+
+- **Heartbeat.** Extend the TTL only while we still own the lock (same
+  GET-equals-token guard, then `EXPIRE`). Run the heartbeat at **10s for a 30s
+  TTL** — two heartbeats of headroom before expiry. If the holder dies (Node
+  crash, container kill), the TTL lapses within ~20s and another agent picks up
+  the session; no manual unlock path is needed.
 
 ---
 

@@ -23,7 +23,7 @@ Use a **CDC (Change Data Capture)** pattern: the hot-path conversation store (Re
 - Postgres becomes queryable for offline analytics, support investigations, and the teacher-loop / auto-curriculum jobs described in [ADR-005 (Runtime/Kernel Layer Split)](./0005-runtime-kernel-layer-split.md).
 - If NATS or the subscriber is down, conversations are still served from Redis but the archive lags. This is the intentional failure mode: hot-path availability beats archive completeness.
 - Scenario integration tests (11 fixtures at the time of writing the original decision) cover the conversation flows most prone to production regressions.
-- In a `@claustrum/core`-based adopter, this pattern is implemented at the adopter layer — claustrum's `SessionStore` port is the interface, and the adopter's `claustrum-bootstrap.ts` wires its preferred Redis + Postgres + NATS implementations. The CDC subscriber is adopter-domain code, not part of `@claustrum/core`.
+- In a `@claustrum/core`-based adopter, this pattern is implemented at the adopter layer — claustrum's `SessionPort` (`packages/core/src/ports/session.ts`) defines the cross-turn session contract, and the adopter's `claustrum-bootstrap.ts` wires its preferred Redis + Postgres + NATS implementations. The CDC subscriber is adopter-domain code, not part of `@claustrum/core`. Note: `SessionPort`'s surface is `load` / `save` / `parkPendingConfirmation` / `parkDeferred` / `unpark` — it does **not** expose `appendMessages()`. The `appendMessages(..., meta?)` write described above is a method on the adopter's hot-path Redis store, not on any claustrum port.
 
 ## Historical files (ibatexas reference adopter, pre-cutover)
 
@@ -33,7 +33,7 @@ Use a **CDC (Change Data Capture)** pattern: the hot-path conversation store (Re
 - CLI: `packages/cli/src/commands/chat.ts` (`ibx chat list/dump/clean/scenarios`)
 - Tests: `packages/llm-provider/src/__tests__/scenarios/` (11 fixtures)
 
-The `packages/llm-provider/` location is historical (pre-claustrum-cutover). In a claustrum-based adopter the conversation store is wired through `@claustrum/core`'s `SessionStore` port; the scenario tests would live in `@claustrum/conformance` or in the adopter's own integration-test tree.
+The `packages/llm-provider/` location is historical (pre-claustrum-cutover). In a claustrum-based adopter the cross-turn session is wired through `@claustrum/core`'s `SessionPort`; the scenario tests would live in `@claustrum/conformance` or in the adopter's own integration-test tree.
 
 ## Cross-references
 

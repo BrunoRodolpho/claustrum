@@ -1,53 +1,50 @@
 # ADR-001: `IntentEnvelope` as the runtime ↔ kernel wire protocol
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Date:** 2026-05-26
 - **Deciders:** Bruno Rodolpho, claustrum core team
 - **Consulted:** @adjudicate/core maintainers
 - **References:**
-  - `packages/core/src/audit.ts` in `@adjudicate/core` (canonical TS types: `IntentEnvelope`, `Decision`, `AuditRecord`)
-  - `packages/core/src/basis-codes.ts` in `@adjudicate/core` (basis-code vocabulary)
-  - PART I §"The Adjudicator port" of master plan
+  - `packages/core/src/envelope.ts` in `@adjudicate/core` — canonical TS types (`IntentEnvelope`, `buildEnvelope`, `isIntentEnvelope`) and `INTENT_ENVELOPE_VERSION`
+  - `packages/core/src/audit.ts` in `@adjudicate/core` — `AuditRecord`, `AUDIT_RECORD_VERSION`
+  - `docs/specs/intent-envelope-v2.schema.json` + `docs/specs/canonical-json-hash.md` in `@adjudicate/core` — the normative JSON Schema and the cross-language hash algorithm
   - ADR-005 (Runtime/Kernel Layer Split) — the architectural declaration this ADR realises
 
 ## Context
 
-`@claustrum/core` orchestrates probabilistic cognition (LLM planning, memory retrieval, prompt synthesis) and submits proposed mutations to `@adjudicate/core` for deterministic adjudication. Today, `IntentEnvelope` is a TypeScript interface exported only from `@adjudicate/core`. Two repos importing the same TS type by file path is a fragile coupling — once `@claustrum/*` ships to npm, three coordination problems emerge:
+`@claustrum/core` orchestrates probabilistic cognition (LLM planning, memory retrieval, prompt synthesis) and submits proposed mutations to `@adjudicate/core` for deterministic adjudication. `IntentEnvelope` is a TypeScript type exported from `@adjudicate/core`; claustrum imports it (and `buildEnvelope`) as its only kernel surface. Treating that type as a shared TS interface is a fragile coupling once `@claustrum/*` ships to npm, because three coordination problems emerge:
 
-**First, schema evolution.** Adjudicate is on `INTENT_ENVELOPE_VERSION = 2` and has already burned one schema break (v1 → v2 added `nonce` as a hash input). The audit ledger is at `AUDIT_RECORD_VERSION = 4`. Adding a field is currently a coordinated TS-type bump across both repos.
+**First, schema evolution.** Adjudicate is on `INTENT_ENVELOPE_VERSION = 2` and has already burned one schema break (v1 → v2 added `nonce` as a hash input). The audit ledger is on `AUDIT_RECORD_VERSION = 5`. Adding a field is otherwise a coordinated TS-type bump across both repos.
 
-**Second, replay across repo versions.** A claustrum v0.3.0 envelope landing in an audit ledger that adjudicate v1.2.0 reads back must hash-match months later. Adopters running `adjudicate.replayEnvelopesByCustomerId()` need stable bytes regardless of which package version produced the envelope.
+**Second, replay across repo versions.** A claustrum envelope landing in an audit ledger that a later adjudicate version reads back must hash-match months later. Adopters running `adjudicate.replayEnvelopesByCustomerId()` need stable bytes regardless of which package version produced the envelope.
 
-**Third, language-portability.** While both packages are TypeScript today, the envelope is a wire format. A future Python-based agent or Rust-based grounding service must construct envelopes adjudicate accepts. TS interfaces are not a portable contract.
+**Third, language-portability.** Both packages are TypeScript today, but the envelope is a wire format. A future Python or Rust agent must construct envelopes adjudicate accepts. A TS interface is not a portable contract.
 
 ## Decision
 
 We treat `IntentEnvelope` as a **versioned wire protocol with protobuf-style additive discipline**, not as a TS-only type:
 
-1. **Schema version is required and explicit.** The `version: 2` literal is part of the hash input (`hashInput = { version, kind, payload, nonce, actor, taint }`). Bumping the version is a deliberate ledger-shape break, not a refactor.
+1. **Schema version is required and explicit.** `version: 2` is part of the hash input. Bumping the version is a deliberate ledger-shape break, not a refactor.
 
-2. **All new fields are optional.** Following `AuditRecord`'s v1→v4 evolution pattern: every field added past v2 (e.g., a future `groundingProof`, `agentId`, `tenantId`) is marked optional and absent in v2-shaped records. Readers branch on `record.version` only when they need post-v2 fields. This is documented as a hard rule in `@claustrum/core`'s contributing guide.
+2. **All new fields are optional.** Following `AuditRecord`'s additive evolution: every field added past v2 (e.g. a future `agentId`, `tenantId`) is optional and absent in v2-shaped records. Readers branch on `record.version` only when they need post-v2 fields.
 
-3. **Reserved field-name registry.** Maintain `docs/decisions/0001-reserved-fields.md` (forthcoming companion doc) listing every field name that has ever appeared on an envelope plus its semantic. Removing or repurposing a field is forbidden — protobuf-style. The current reserved set is `{ version, kind, payload, createdAt, nonce, actor, taint, intentHash, supersedes, groundingProof? }`.
+3. **The top-level key set is closed.** `isIntentEnvelope` enforces `additionalProperties: false` (envelope.ts `EXPECTED_ENVELOPE_KEYS`): the exhaustive top-level keys are exactly `{ version, kind, payload, createdAt, nonce, actor, taint, intentHash }`. An extra or missing key is rejected, because a stray key would canonicalize into the hash and silently break retry dedup. Removing or repurposing a field is forbidden — protobuf-style. (Note: `supersedes` is an `AuditRecord` field, not an envelope field; it does not appear here.)
 
-4. **`intentHash` derivation is canonical and stable.** Hash inputs in canonical-JSON ordering: `(version, kind, payload, nonce, actor, taint)`. `createdAt` is explicitly excluded so retries with identical nonce produce identical hashes regardless of wall-clock. `intentHash` itself is excluded from its own hash input (self-reference). This is the existing `sha256Canonical` behavior in adjudicate's `envelope.ts` — claustrum inherits it as the cross-language contract.
+4. **`intentHash` derivation is canonical and stable.** Hash inputs in canonical-JSON ordering are `(version, kind, payload, nonce, actor, taint)`. `createdAt` is excluded so retries with an identical nonce produce identical hashes regardless of wall-clock, and `intentHash` is excluded from its own input (self-reference). This is the `sha256Canonical` behavior in adjudicate's `envelope.ts`; claustrum inherits it as the cross-language contract. The algorithm is normatively specified in `@adjudicate/core`'s `docs/specs/canonical-json-hash.md`.
 
-5. **JSON Schema generation.** `@claustrum/core` will ship a `schemas/intent-envelope.v2.json` (forthcoming; not yet generated) derived from the TS type. Non-TS consumers (future Python/Rust adapters) will validate against the JSON Schema, not the TS file.
+5. **The JSON Schema is kernel-owned, not generated by claustrum.** The normative schema already exists kernel-side at `@adjudicate/core`'s `docs/specs/intent-envelope-v2.schema.json` (paired with `canonical-json-hash.md`). Non-TS consumers (future Python/Rust adapters) validate against that schema. `@claustrum/core` does not ship or generate a copy.
 
-6. **Peer-dep pin on `@adjudicate/core` by major version.** `@claustrum/core` declares `@adjudicate/core` as a peerDependency pinned to `^1.0.0` (or whatever majors envelope v2 is stable in). Bumping `@adjudicate/core` to a major that ships envelope v3 requires a coordinated `@claustrum/core` major bump.
+6. **Peer-dep pin on `@adjudicate/core` by major version.** `@claustrum/core` declares `@adjudicate/core` as a peerDependency pinned to `^1.1.0` (the range envelope v2 is stable in). Bumping `@adjudicate/core` to a major that ships envelope v3 requires a coordinated `@claustrum/core` major bump.
 
 ## Consequences
 
 **Positive:**
-- Claustrum can ship envelope-producing code without re-implementing the type — it imports `IntentEnvelope` + `buildEnvelope` from `@adjudicate/core` and treats them as the protocol surface.
+- Claustrum ships envelope-producing code without re-implementing the type — it imports `IntentEnvelope` + `buildEnvelope` from `@adjudicate/core` (already live: `@claustrum/core` 0.2.0) and treats them as the protocol surface.
 - Audit ledgers from any claustrum version remain replayable by future adjudicate versions; basis-code vocabulary grows additively.
-- The JSON Schema unblocks third-party language SDKs without forcing a TS-only ecosystem.
-- The "envelope is a wire protocol, not a TS struct" framing is enforced by reviewers — additions are PRs to this ADR before they are code.
+- The kernel-owned JSON Schema unblocks third-party language SDKs without a TS-only ecosystem.
+- "Envelope is a wire protocol, not a TS struct" is enforced by reviewers — additive changes are PRs to the kernel schema before they are code.
 
 **Negative:**
-- Protobuf-style discipline is enforced by code-review, not by tooling. A reviewer must catch a non-additive change. Mitigated by a CI step that diffs the JSON Schema for breaking shape changes.
-- Field-name conflicts can occur if claustrum and adjudicate evolve independently. Resolved by ADR-001 being co-owned: both repos' maintainers approve schema changes.
-- Field-bloat risk over time. Mitigated by an annual review pass — fields unused for >2 minor releases get marked deprecated, never removed.
-
-**Neutral:**
-- Until envelope v3 ships, this ADR is documentation-only — no code changes. Its value is the social contract it establishes before the second repo starts producing envelopes at scale.
+- Protobuf-style discipline is enforced by code-review plus `isIntentEnvelope`'s closed-key check, not by a schema-diff gate. A reviewer must still catch a semantically non-additive change.
+- Field-name conflicts can occur if claustrum and adjudicate evolve independently. Resolved by the envelope schema being kernel-owned: schema changes go through adjudicate maintainers.
+- Field-bloat risk over time. Mitigated by periodic review — fields unused for >2 minor releases get marked deprecated, never removed.

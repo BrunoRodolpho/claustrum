@@ -42,7 +42,7 @@ This is **the first governance-native conversational runtime framework**. Botpre
 
 | Package | Responsibility |
 |---|---|
-| [`@claustrum/core`](./packages/core) | Conductor, Capsule, `handleTurn` cognitive loop, 13 port interfaces, Adjudicator interface |
+| [`@claustrum/core`](./packages/core) | Conductor, Capsule, `handleTurn` cognitive loop, 14 port interfaces, Adjudicator interface |
 | [`@claustrum/anthropic`](./packages/anthropic) | Anthropic `ModelProvider` adapter |
 | [`@claustrum/openai`](./packages/openai) | OpenAI `ModelProvider` adapter |
 | [`@claustrum/channel-whatsapp`](./packages/channel-whatsapp) | Twilio WhatsApp `ChannelDriver` |
@@ -62,25 +62,39 @@ npm install @claustrum/core @claustrum/anthropic @adjudicate/core
 ## 30-second example
 
 ```typescript
+import Anthropic from "@anthropic-ai/sdk";
 import { createConductor, handleTurn } from "@claustrum/core";
-import { AnthropicProvider } from "@claustrum/anthropic";
+import { AnthropicProvider, wrapAnthropicSdk } from "@claustrum/anthropic";
 
-const conductor = await createConductor({
-  modelProvider: new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY! }),
-  // ...other providers via port interfaces
+// The model provider is a port consumed by the planner/responder adapters —
+// it is NOT a top-level Conductor option.
+const model = new AnthropicProvider({
+  client: wrapAnthropicSdk(new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })),
 });
 
+// createConductor is synchronous. ConductorOptions requires every port:
+// adjudicator, memory, grounding, planner, responder, explainer, handoff,
+// telemetry, session, tools, channels, tenantResolver.
+const conductor = createConductor({
+  planner: makePlanner(model),
+  responder: makeResponder(model),
+  // ...remaining ports
+});
+
+const inbound = { text: "Refund the last R$ 200 charge." /* ...ChannelMessage */ };
 const capsule = await conductor.openCapsule({
   channel: "web",
   customerId: "cust_123",
-  inbound: { text: "Refund the last R$ 200 charge." },
+  inbound,
 });
 
-const result = await handleTurn(capsule, capsule.inbound);
+const result = await handleTurn(capsule, inbound);
 // result.decision ∈ { EXECUTE | REFUSE | DEFER | ESCALATE | REQUEST_CONFIRMATION | REWRITE }
-// result.response — user-facing text
-// result.audit  — auditHash for replay
+// result.response — user-facing rendered text
+// result.audit    — auditHash for replay (present when the adjudicator emits one)
 ```
+
+For a complete, runnable wiring of every port see [`examples/minimal-chat`](./examples/minimal-chat).
 
 The runnable end-to-end demo:
 
