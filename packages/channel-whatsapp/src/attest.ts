@@ -21,13 +21,19 @@ import { createHmac } from "node:crypto";
 import { canonicalJson, type IntentEnvelope } from "@adjudicate/core";
 import {
   resolveGatewaySigningKey,
+  type ChannelKind,
   type GatewaySigningKey,
   type SignedEnvelope,
 } from "@claustrum/core";
 
 export interface AttestContext {
-  /** Channel kind, written to `actor.channel`. */
-  readonly channel: "whatsapp" | "web";
+  /**
+   * Channel kind, written to `actor.channel`. Sourced from the canonical
+   * `ChannelKind` union in `@claustrum/core` — this was previously a
+   * parallel literal union (`"whatsapp" | "web"`) that silently drifted
+   * when the port union widened.
+   */
+  readonly channel: ChannelKind;
   /**
    * Gateway identifier — for WhatsApp this is the Twilio sender (e.g.
    * `whatsapp:+14155238886`); for web it's the gateway hostname. Written

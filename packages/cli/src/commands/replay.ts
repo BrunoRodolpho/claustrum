@@ -25,7 +25,12 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
-import { handleTurn, type Conductor, type OpenCapsuleInput } from "@claustrum/core";
+import {
+  handleTurn,
+  type ChannelKind,
+  type Conductor,
+  type OpenCapsuleInput,
+} from "@claustrum/core";
 import { loadConductorFactory } from "../lib/load-conductor.js";
 
 export interface ReplayOptions {
@@ -40,7 +45,9 @@ export interface ReplayOptions {
 
 interface TurnFile {
   readonly turnId?: string;
-  readonly channel: "web" | "whatsapp";
+  // Canonical ChannelKind — was a third parallel literal union before the
+  // "system" widening; kept in lockstep with @claustrum/core now.
+  readonly channel: ChannelKind;
   readonly customerId: string;
   readonly conversationId?: string;
   readonly text: string;

@@ -69,6 +69,74 @@ export interface ConductorOptions {
   readonly sessionLock?: SessionLock;
   /** Max time to wait for a contended session lock before failing the turn closed. Default 10s. */
   readonly sessionLockTimeoutMs?: number;
+  /**
+   * Lock-KEY derivation for the per-session lock (DR-4).
+   *
+   * Default: {@link defaultLockKey} — `` `${channel}:${customerId}` ``,
+   * byte-identical to pre-0.3 behavior. See {@link LockKeyStrategy} for the
+   * full contract and {@link sessionKeyAwareLockKey} for the opt-in
+   * sessionKey-honoring strategy used by non-conversational trigger turns.
+   */
+  readonly lockKeyStrategy?: LockKeyStrategy;
+}
+
+/**
+ * Derives the per-session lock KEY from an `openCapsule` input — i.e. the
+ * serialization domain a turn runs in. Two turns serialize iff their derived
+ * keys are equal (same `SessionLock` domain).
+ *
+ * Contract:
+ * - The derived key MUST be a pure, deterministic function of the input
+ *   (no clocks, no randomness) — retries of the same turn must contend on
+ *   the same key.
+ * - The derived key MUST cover the session-storage domain the turn mutates.
+ *   The Conductor loads and saves the session by `(customerId, channel)`
+ *   (see `SessionPort.load` / `closeCapsule`), so a strategy that derives
+ *   keys NARROWER than `${channel}:${customerId}` for turns sharing a stored
+ *   session reintroduces the RC-R3 race it exists to prevent. Widening (one
+ *   key covering several storage domains) is always safe — merely coarser.
+ *
+ * Why this is configurable at all: the default key cannot serialize a
+ * non-conversational trigger turn (channel `"system"`) against the chat
+ * turns of the entity it acts on — `system:cust-1` and `web:cust-1` never
+ * contend. The trigger path supplies an explicit `sessionKey` naming the
+ * entity-scoped serialization domain and the conductor hosting it installs
+ * {@link sessionKeyAwareLockKey}.
+ */
+export type LockKeyStrategy = (input: OpenCapsuleInput) => string;
+
+/**
+ * Default lock-key derivation: `` `${channel}:${customerId}` `` — exactly the
+ * session-storage domain. `input.sessionKey` is deliberately IGNORED for
+ * locking here (it still feeds `actor.sessionId` and the `TenantResolver`):
+ * conversational callers commonly pass a per-conversation `sessionKey`, and
+ * narrowing the lock to one conversation would let two conversations of the
+ * same customer race on the shared `(customerId, channel)` session row.
+ */
+export function defaultLockKey(input: OpenCapsuleInput): string {
+  return `${input.channel}:${input.customerId}`;
+}
+
+/**
+ * DR-4 opt-in strategy: when the turn carries an explicit `sessionKey`, that
+ * string IS the lock key — the caller owns the serialization domain. Without
+ * a `sessionKey` it falls back to {@link defaultLockKey}, so conversational
+ * turns through the same conductor are unchanged.
+ *
+ * Built for trigger turns (channel `"system"`): an agent acting on an entity
+ * passes the entity-scoped domain as `sessionKey` — e.g. the chat lock key
+ * `web:<customerId>` of the customer it remediates — so the agent turn and a
+ * concurrent human chat turn for that customer strictly serialize across
+ * processes (under a distributed `SessionLock`).
+ *
+ * Install ONLY on conductor compositions whose `sessionKey`-passing callers
+ * mean "serialization domain" by it (e.g. a dedicated agent-host conductor).
+ * Do NOT install on a conductor whose chat routes pass per-conversation
+ * sessionKeys — that would narrow the lock below the session-storage domain
+ * (see {@link LockKeyStrategy}).
+ */
+export function sessionKeyAwareLockKey(input: OpenCapsuleInput): string {
+  return input.sessionKey !== undefined ? input.sessionKey : defaultLockKey(input);
 }
 
 export interface OpenCapsuleInput {
@@ -98,8 +166,7 @@ export function createConductor(options: ConductorOptions): Conductor {
   // Capsule type free of lock internals and lets a dropped capsule GC its lock.
   const lockHandles = new WeakMap<Capsule, SessionLockHandle>();
 
-  const sessionKeyOf = (channel: ChannelKind, customerId: string): string =>
-    `${channel}:${customerId}`;
+  const lockKeyOf: LockKeyStrategy = options.lockKeyStrategy ?? defaultLockKey;
 
   const channelsMap: Partial<Record<ChannelKind, ChannelDriver>> = {};
   for (const driver of options.channels) {
@@ -119,7 +186,9 @@ export function createConductor(options: ConductorOptions): Conductor {
       // (released in closeCapsule). This serializes concurrent turns for the
       // same session so adjudicate() fires exactly once per turn (RC-R3).
       // Fail closed on contention timeout rather than proceed unserialized.
-      const lockKey = sessionKeyOf(input.channel, input.customerId);
+      // The key is derived by the configured LockKeyStrategy (default:
+      // `${channel}:${customerId}` — see defaultLockKey / DR-4).
+      const lockKey = lockKeyOf(input);
       const lockHandle = await sessionLock.acquire(lockKey, {
         timeoutMs: lockTimeoutMs,
       });

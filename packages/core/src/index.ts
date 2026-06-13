@@ -9,8 +9,11 @@
 // ── Conductor + Capsule + cognitive loop ───────────────────────────────────
 export {
   createConductor,
+  defaultLockKey,
+  sessionKeyAwareLockKey,
   type Conductor,
   type ConductorOptions,
+  type LockKeyStrategy,
   type OpenCapsuleInput,
 } from "./conductor.js";
 export type { Capsule, ChannelMap } from "./capsule.js";
