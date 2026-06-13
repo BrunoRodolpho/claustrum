@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/anthropic",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ModelProvider adapter for the Anthropic Messages API. Streaming-cancellable, error-translated, stop-reason-normalized.",
   "license": "MIT",
   "type": "module",

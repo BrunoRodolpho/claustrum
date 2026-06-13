@@ -20,7 +20,18 @@ import type { IntentEnvelope } from "@adjudicate/core";
 // imports `ChannelKind` from here), fully erased at runtime.
 import type { ParkedEnvelope, Session } from "./session.js";
 
-export type ChannelKind = "whatsapp" | "web";
+/**
+ * The closed set of channel kinds the runtime routes on.
+ *
+ * - `"whatsapp"` / `"web"` — conversational channels with a human on the
+ *   other end.
+ * - `"system"` — non-conversational ingress for runtime-internal turns:
+ *   a trigger event (payment webhook, scheduled job, agent activation)
+ *   normalized by an adopter-supplied system `ChannelDriver` into a
+ *   `ChannelMessage`. There is no human counterpart; `render()` typically
+ *   journals instead of delivering, and `matchToParked` returns `null`.
+ */
+export type ChannelKind = "whatsapp" | "web" | "system";
 
 export interface ChannelMessage {
   readonly channel: ChannelKind;
