@@ -3,8 +3,9 @@
  *
  * Reframes the cognitive-loop invariants (tool-capability indirection,
  * single-EXECUTE per turn, prompt manifest in trace, REFUSE renders text,
- * memory routes via Adjudicator, few-shot regression) as a one-shot
- * check adopters can call against their own Conductor:
+ * memory routes via Adjudicator, few-shot regression, responder respects
+ * decision) as a one-shot check adopters can call against their own
+ * Conductor:
  *
  * ```ts
  * import { runConformance } from "@claustrum/conformance";
@@ -44,3 +45,4 @@ export { promptManifestInTraceCheck } from "./checks/prompt-manifest-in-trace.js
 export { refuseRendersUserTextCheck } from "./checks/refuse-renders-user-text.js";
 export { memoryRecentActionsViaApiCheck } from "./checks/memory-recent-actions-via-api.js";
 export { fewShotRegressionCheck } from "./checks/few-shot-regression.js";
+export { responderRespectsDecisionCheck } from "./checks/responder-respects-decision.js";

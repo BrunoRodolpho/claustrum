@@ -151,6 +151,12 @@ export interface MakeTestConductorOptions {
    * probe the "no tools registered" and "internal id leak" branches.
    */
   readonly tools?: ToolRegistry | null;
+  /**
+   * Override the default (decision-aware) responder. Used by CC-007 tests
+   * to inject a decision-BLIND responder (one that ignores `input.decision`
+   * and answers from the user text alone) and prove the check fails it.
+   */
+  readonly responder?: ResponderPort;
 }
 
 export function makeTestConductor(
@@ -176,7 +182,7 @@ export function makeTestConductor(
     memory,
     grounding: new EmptyGroundingProvider(),
     planner: makePlanner(),
-    responder: makeResponder(),
+    responder: options.responder ?? makeResponder(),
     explainer: makeExplainer(),
     handoff: makeHandoff(),
     telemetry,

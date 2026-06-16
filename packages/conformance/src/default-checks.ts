@@ -14,6 +14,7 @@ import { fewShotRegressionCheck } from "./checks/few-shot-regression.js";
 import { memoryRecentActionsViaApiCheck } from "./checks/memory-recent-actions-via-api.js";
 import { promptManifestInTraceCheck } from "./checks/prompt-manifest-in-trace.js";
 import { refuseRendersUserTextCheck } from "./checks/refuse-renders-user-text.js";
+import { responderRespectsDecisionCheck } from "./checks/responder-respects-decision.js";
 import { toolCapabilityIndirectionCheck } from "./checks/tool-capability-indirection.js";
 import type { ConformanceCheck } from "./types.js";
 
@@ -24,4 +25,5 @@ export const DEFAULT_CHECKS: ReadonlyArray<ConformanceCheck> = [
   refuseRendersUserTextCheck,
   memoryRecentActionsViaApiCheck,
   fewShotRegressionCheck,
+  responderRespectsDecisionCheck,
 ];
