@@ -119,13 +119,21 @@ function makeLivePlanner(provider: ModelProvider): PlannerPort {
 
       const tc = completion.toolCalls?.[0];
       const input = (tc?.input ?? {}) as { capability?: string; payload?: unknown };
-      const capability = input.capability ?? "weather.lookup";
-      const payload = input.payload ?? { city: "Sao Paulo" };
+      // SAFETY (do NOT copy the previous version of this): only build an envelope
+      // when the model ACTUALLY proposed a KNOWN capability via express_intent. A
+      // turn with no proposal — or a hallucinated/foreign capability — yields an
+      // EMPTY plan (respond-only), mirroring the production runtime. Fabricating a
+      // default envelope here would execute an action the user never requested; and
+      // LLM-derived intent is ALWAYS taint:"UNTRUSTED", never TRUSTED.
+      const capability = input.capability;
+      if (typeof capability !== "string" || !CAPS.some((c) => c.capability === capability)) {
+        return { envelopes: [], capabilities: [] };
+      }
       const envelope = buildEnvelope({
         kind: capability,
-        payload,
+        payload: input.payload ?? {},
         actor: { principal: "llm", sessionId: state.turnId },
-        taint: "TRUSTED",
+        taint: "UNTRUSTED",
         nonce: `nonce-${state.turnId}`,
       }) as IntentEnvelope;
       return { envelopes: [envelope], capabilities: [String(envelope.kind)] };
@@ -191,7 +199,7 @@ async function main(): Promise<void> {
 
   // Invariant (Hard Rule #1): the only LLM-facing tool is express_intent; the
   // registry's capability projection must expose NO internal tool id.
-  const caps = tools.resolveCapabilities({} as never) as ReadonlyArray<Record<string, unknown>>;
+  const caps = tools.resolveCapabilities({} as never) as unknown as ReadonlyArray<Record<string, unknown>>;
   const leaksId = caps.some((c) => "id" in c);
   const knownIds = ["weather.lookup.v1", "calendar.book.v1"];
   const idLeak = caps.some((c) => knownIds.includes(String((c as { capability?: unknown }).capability)));
