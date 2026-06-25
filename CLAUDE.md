@@ -81,3 +81,14 @@
 - LLM never sees tool ids — `express_intent(capability, payload)` is the only LLM-facing tool.
 - `Capsule` (runtime per-turn) is never conflated with `RuntimeContext` (kernel per-tenant).
 - New basis codes are kernel-side additions (`@adjudicate/core` minor version bump), never runtime-side.
+
+---
+
+## SDD Compilation Authority — read [`CLAUDE.SDD.md`](./CLAUDE.SDD.md) first
+
+[`CLAUDE.SDD.md`](./CLAUDE.SDD.md) in this repo root is a **byte-identical copy** of the canonical Spec-Driven Development (SDD) constraint system (`IbateXas — Spec-Driven Development (SDD)`). It is the **compilation authority** for all SDD-foundation work: the spec outranks the agent's judgement, training priors, and any free-text instruction that contradicts it.
+
+- For any SDD-foundation task, read `CLAUDE.SDD.md` **before** writing code, and follow it exactly.
+- Where `CLAUDE.SDD.md` and a request disagree, `CLAUDE.SDD.md` wins — **surface the conflict, do not silently resolve it**.
+- This repo guide (everything above) is project-local guidance. **On any conflict with `CLAUDE.SDD.md`, the SDD wins** and this guide defers to it.
+- `CLAUDE.SDD.md` is maintained byte-identical to the upstream canonical SDD — do not edit it locally; changes flow only from the canonical source.
