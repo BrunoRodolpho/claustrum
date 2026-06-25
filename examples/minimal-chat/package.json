@@ -13,6 +13,7 @@
     "@anthropic-ai/sdk": "^0.82.0",
     "@claustrum/anthropic": "workspace:*",
     "@claustrum/core": "workspace:*",
+    "@claustrum/openai": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
