@@ -15,7 +15,11 @@
  * by `Conductor.closeCapsule` after the turn.
  */
 
-import type { Decision, IntentEnvelope } from "@adjudicate/core";
+import type {
+  ClaimsKernelDeps,
+  Decision,
+  IntentEnvelope,
+} from "@adjudicate/core";
 import type {
   Adjudicator,
   ConfirmationReceipt,
@@ -23,9 +27,11 @@ import type {
   SystemState,
 } from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind } from "./ports/channel.js";
+import type { ClaimPlannerPort } from "./ports/claim-planner.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
+import type { InvestigatorPort } from "./ports/investigator.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
 import type { ResolverPort } from "./ports/resolver.js";
@@ -74,6 +80,30 @@ export interface Capsule {
    * adjudicated as-is against `state`.
    */
   readonly resolver?: ResolverPort;
+  /**
+   * Optional INVESTIGATE stage (SDD §M / §Q.6; v1.1 §7; Inv 7). When wired,
+   * `handleTurn` runs it after RESOLVE to populate THE per-turn Evidence Ledger
+   * from this turn's resolved reads/context — the ledger is then threaded into
+   * CLAIMS-VALIDATE. Absent → no claim pipeline runs (legacy loop unchanged).
+   * The Ledger is structural to the loop, NOT embedded in the responder (§M).
+   */
+  readonly investigator?: InvestigatorPort;
+  /**
+   * Optional candidate-claim source for the CLAIMS-VALIDATE stage (SDD §M /
+   * §Q.6; v1.1 §8). When wired (with `investigator` + `claimsKernel`), the
+   * planner's typed candidate claims are run through the published Claims Kernel
+   * (P1 ∘ P2) against the threaded ledger. The claim-aware planner that
+   * constrains generation over the registry enum lands DOWNSTREAM (ibatexas).
+   */
+  readonly claimPlanner?: ClaimPlannerPort;
+  /**
+   * The injected capabilities the published Claims Kernel composes (SDD §F): the
+   * Q3 soundness deps (`owns` / `outcomeConfirmed` / `now`) and the optional Q4
+   * same-subject consistency table. Repo-specific (ownership model,
+   * action-outcome wiring); claustrum threads them straight through and holds no
+   * policy of its own. Required (with `claimPlanner`) for CLAIMS-VALIDATE to run.
+   */
+  readonly claimsKernel?: ClaimsKernelDeps;
   readonly tools: ToolRegistry;
   readonly channels: ChannelMap;
   readonly responder: ResponderPort;

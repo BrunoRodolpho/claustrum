@@ -14,7 +14,11 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Decision, IntentEnvelope } from "@adjudicate/core";
+import type {
+  ClaimsKernelDeps,
+  Decision,
+  IntentEnvelope,
+} from "@adjudicate/core";
 import type { Capsule, ChannelMap } from "./capsule.js";
 import type {
   Adjudicator,
@@ -22,9 +26,11 @@ import type {
   SystemState,
 } from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind, ChannelMessage } from "./ports/channel.js";
+import type { ClaimPlannerPort } from "./ports/claim-planner.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
+import type { InvestigatorPort } from "./ports/investigator.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
 import type { ResolverPort } from "./ports/resolver.js";
@@ -56,6 +62,18 @@ export interface ConductorOptions {
    * envelope state before the kernel adjudicates. Absent → legacy behavior.
    */
   readonly resolver?: ResolverPort;
+  /**
+   * Optional claim pipeline (SDD §M / §Q.6). When all three are supplied,
+   * `handleTurn` runs the INVESTIGATE + CLAIMS-VALIDATE stages: the investigator
+   * populates the per-turn Evidence Ledger, the claim planner proposes typed
+   * candidate claims, and the published Claims Kernel (`claimsKernel` deps)
+   * validates them (P1 ∘ P2) against the threaded ledger. Absent → no claim
+   * pipeline runs (the legacy 7-stage loop is byte-equivalent). Wired by the
+   * downstream adopter (ibatexas), not forced on every conductor.
+   */
+  readonly investigator?: InvestigatorPort;
+  readonly claimPlanner?: ClaimPlannerPort;
+  readonly claimsKernel?: ClaimsKernelDeps;
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
   /**
@@ -243,6 +261,20 @@ export function createConductor(options: ConductorOptions): Conductor {
         planner: options.planner,
         ...(options.resolver !== undefined
           ? { resolver: options.resolver }
+          : {}),
+        // Claim pipeline (SDD §M / §Q.6) — wired through only when the adopter
+        // supplied them; each is an independent optional seam (the loop runs the
+        // stages only when investigator + claimPlanner + claimsKernel are all
+        // present, so a partial wiring degrades to the legacy loop, never to an
+        // unchecked claim).
+        ...(options.investigator !== undefined
+          ? { investigator: options.investigator }
+          : {}),
+        ...(options.claimPlanner !== undefined
+          ? { claimPlanner: options.claimPlanner }
+          : {}),
+        ...(options.claimsKernel !== undefined
+          ? { claimsKernel: options.claimsKernel }
           : {}),
         tools: options.tools,
         channels,

@@ -16,7 +16,7 @@
  * dispatcher looks up by kind directly.
  */
 
-import type { Decision, IntentEnvelope } from "@adjudicate/core";
+import { DEFAULT_ORIGIN, type Decision, type IntentEnvelope } from "@adjudicate/core";
 import type { Capsule } from "../capsule.js";
 import type { Plan } from "../ports/planner.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -391,6 +391,10 @@ function emptyEnvelope(): IntentEnvelope {
     nonce: "<noop>",
     actor: { principal: "system", sessionId: "<noop>" },
     taint: "SYSTEM",
+    // `origin` became a required v2 field in @adjudicate/core 1.5.0 (the linked
+    // kernel). This is a noop sentinel envelope (never adjudicated/dispatched);
+    // the default origin keeps it well-formed without changing behavior.
+    origin: DEFAULT_ORIGIN,
     intentHash: "<noop>",
   };
 }

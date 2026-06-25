@@ -92,6 +92,18 @@ export type {
   ResolverInput,
 } from "./ports/resolver.js";
 export type {
+  InvestigatorPort,
+  InvestigateInput,
+} from "./ports/investigator.js";
+export type {
+  ClaimPlannerPort,
+  ClaimPlannerInput,
+} from "./ports/claim-planner.js";
+export {
+  runInvestigate,
+  runClaimsValidate,
+} from "./claims-loop/index.js";
+export type {
   ResponderPort,
   DraftResponse,
   OutputContext,
