@@ -425,6 +425,49 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     expect(result.claims).toBeUndefined();
   });
 
+  it("R2b (a): a turn with an EMPTY candidate set (greeting/smalltalk) yields NO claims result, NOT a terminal UNKNOWN", async () => {
+    // The full pipeline IS wired (investigator + claim planner + kernel deps),
+    // but the planner proposes NOTHING — there is nothing to assert. UNKNOWN is
+    // honest ignorance about a REQUESTED claim (SDD §I/§K), so an empty candidate
+    // set must NOT be forced into a terminal claims-UNKNOWN. The stage returns
+    // undefined and the turn carries no spurious claims result.
+    //
+    // NON-VACUITY: remove the `candidates.length === 0` guard in
+    // claims-validate.ts and `result.claims` becomes the kernel's empty-set
+    // result `{ perClaim: [], renderable: [], terminal: "UNKNOWN" }` — these
+    // assertions go RED (claims is defined; terminal is UNKNOWN).
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([]); // greeting: no candidate claims
+    const { conductor } = makeBundle({ investigator, claimPlanner });
+
+    const result = await runTurn(conductor);
+
+    // The claim planner WAS consulted (the pipeline is fully wired) …
+    expect(claimPlanner.calls).toBe(1);
+    // … but with no candidates there is no claims result — no spurious UNKNOWN.
+    expect(result.claims).toBeUndefined();
+  });
+
+  it("R2b (b): a NON-EMPTY candidate set is unchanged — still flows through runClaimsKernel to the normal validated result", async () => {
+    // Guards the early-return: it must trigger ONLY on the empty set. A single
+    // sound candidate must still reach the kernel and render normally (RENDER +
+    // VALIDATED), proving the guard did not short-circuit the live path.
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    const { conductor } = makeBundle({ investigator, claimPlanner });
+
+    const result = await runTurn(conductor);
+
+    expect(claimPlanner.calls).toBe(1);
+    expect(result.claims).toBeDefined();
+    expect(result.claims!.terminal).toBe("RENDER");
+    expect(result.claims!.perClaim).toEqual([
+      { subject: ORDER, type: "ORDER_FULFILLMENT_STAGE", verdict: "VALIDATED" },
+    ]);
+  });
+
   it("criterion 5 (non-vacuity, dual): a wired pipeline that OMITS the kernel deps does NOT validate → `claims` undefined", async () => {
     // Same proof from the other missing dependency: investigator + claim planner
     // present, but `claimsKernel` deps absent → CLAIMS-VALIDATE must not run.
