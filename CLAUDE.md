@@ -81,3 +81,16 @@
 - LLM never sees tool ids — `express_intent(capability, payload)` is the only LLM-facing tool.
 - `Capsule` (runtime per-turn) is never conflated with `RuntimeContext` (kernel per-tenant).
 - New basis codes are kernel-side additions (`@adjudicate/core` minor version bump), never runtime-side.
+
+---
+
+## Claims-runtime architecture (the SDD invariants)
+
+This repo is the **loop half** of the IbateXas **"claims-not-prose"** runtime. Full source of truth: the IbateXas Agentic Architecture design set (**v1.1 contract** + **Claim Registry v0.1** + the **SDD** constraint system). This is a distillation — on any conflict the canonical design set wins; surface the conflict, do not silently resolve it.
+
+- **Claims, not prose.** The system does not generate responses; it generates *validated claims*, and responses render from them. Soundness (P1) + mutual consistency (P2) are GUARANTEED; correctness (P3) + completeness (P4) are BOUNDED — degrade to `UNKNOWN`/`ESCALATE`/`CLARIFY`, never a confident wrong answer.
+- **Three-valued claim verdict** `VALIDATED | UNKNOWN | REFUSED`; **four turn terminals** `RENDER | UNKNOWN | ESCALATE | CLARIFY` (ESCALATE + CLARIFY are first-class). Dependency arrow `adjudicate → claustrum → ibatexas`, never backward.
+- **The loop owns the Evidence Ledger, not the responder.** `handle-turn.ts` carries **INVESTIGATE** (mint + populate the per-turn `EvidenceLedger`) and **CLAIMS-VALIDATE** (run `@adjudicate/core`'s `runClaimsKernel` = per-claim soundness ∘ set consistency over that *same* threaded ledger → renderable set + turn terminal). Read-error ≠ read-absence (both resolve `UNKNOWN`-or-safer, never a concrete value). These stages are additive to the cognitive loop, gated by optional `Capsule` seams (`investigator`/`claimPlanner`/`claimsKernel`) — byte-equivalent when unwired; the frozen ports are extended, never broken.
+- **Soundness = the §5 predicate** (`requiredEvidence ≠ ∅` ∧ present ∧ fresh ∧ owned ∧ source-integrity ∧ provenance ∧ outcome-for-actions), NOT "Owner==Verified AND age". Ownership is a validation predicate ("no owner" ≠ "any owner" → `REFUSED`); `UNTRUSTED_DATA` never validates a claim. Render templates are proposition-free — no model-authored customer prose; `UNKNOWN`/`REFUSED` assert nothing factual.
+
+This guide's repo-specific content (above) continues to govern day-to-day work and complements these claims-runtime invariants.

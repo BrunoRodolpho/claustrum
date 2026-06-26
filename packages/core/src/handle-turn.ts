@@ -19,9 +19,15 @@
  *   - LLM only sees `express_intent` (via the tool registry indirection)
  */
 
-import type { AuditRecord, Decision, IntentEnvelope } from "@adjudicate/core";
+import type {
+  AuditRecord,
+  ClaimsKernelResult,
+  Decision,
+  IntentEnvelope,
+} from "@adjudicate/core";
 import type { Capsule } from "./capsule.js";
 import type { SystemState } from "./ports/adjudicator.js";
+import { runClaimsValidate, runInvestigate } from "./claims-loop/index.js";
 import {
   dispatchDecision,
   GENERIC_REFUSAL_TEXT,
@@ -41,6 +47,17 @@ export interface TurnResult {
   readonly draft: DraftResponse;
   readonly acted: DispatchResult;
   readonly plan: Plan;
+  /**
+   * The CLAIMS-VALIDATE result (SDD §M / §Q.6; v1.1 §4) — the validated +
+   * consistent renderable claim set + the turn terminal
+   * (`RENDER | UNKNOWN | ESCALATE | CLARIFY`), produced by running the published
+   * Claims Kernel (P1 ∘ P2) over the per-turn Evidence Ledger that INVESTIGATE
+   * populated. Present ONLY when the claim pipeline is wired (an `investigator`
+   * + `claimPlanner` + `claimsKernel` deps); `undefined` on the legacy loop.
+   * The renderer-from-claims (downstream, ibatexas — §Q.7) renders FROM this,
+   * never re-deriving validation.
+   */
+  readonly claims?: ClaimsKernelResult;
 }
 
 export async function handleTurn(
@@ -134,6 +151,27 @@ export async function handleTurn(
       decision = await capsule.adjudicatePlan(plan.envelopes, perEnvelopeStates);
     }
   }
+
+  // 4b. INVESTIGATE (optional, SDD §M / §Q.6; v1.1 §7; Inv 7) — gather this
+  //     turn's evidence INTO a fresh per-turn Evidence Ledger from the resolved
+  //     reads/context. The ledger is a STRUCTURAL part of the loop (built here,
+  //     not embedded in the responder — §M); the SAME instance is threaded into
+  //     CLAIMS-VALIDATE below. `plan` here is the resolved/resumed plan, so the
+  //     investigator gathers evidence for the envelopes that were adjudicated.
+  //     When no investigator is wired this is a no-op (`ledger` stays undefined)
+  //     and the claim pipeline does not run — the legacy loop is byte-equivalent.
+  const ledger = await runInvestigate(capsule, cognition, plan);
+
+  // 4c. CLAIMS-VALIDATE (optional, SDD §M / §Q.6; v1.1 §4, §8; §F) — the
+  //     deterministic post-planner wall. Runs the published Claims Kernel
+  //     (`runClaimsKernel` = P1 soundness ∘ P2 consistency) over the THREADED
+  //     ledger + the planner's typed candidate claims → the renderable
+  //     VALIDATED+consistent set + the turn terminal. The ledger is read-only
+  //     INPUT here (one-directional topology — §F); this stage never writes back
+  //     into it. `undefined` unless the full pipeline is wired. This is NOT a
+  //     mutation verb — it does not call `adjudicate()`, so the once-per-turn
+  //     invariant (Hard Rule #3) is preserved.
+  const claims = await runClaimsValidate(capsule, cognition, plan, ledger);
 
   // 5. ACT — dispatch the decision.
   const acted = await dispatchDecision(decision, plan, capsule);
@@ -266,6 +304,9 @@ export async function handleTurn(
     draft,
     acted,
     plan,
+    // Present only when the claim pipeline is wired; omitted on the legacy loop
+    // so an adopter without the pipeline sees no `claims` key (not `undefined`).
+    ...(claims !== undefined ? { claims } : {}),
   };
 }
 
