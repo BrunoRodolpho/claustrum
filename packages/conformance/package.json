@@ -24,11 +24,11 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@adjudicate/core": "^1.1.0",
+    "@adjudicate/core": "^1.6.0",
     "@claustrum/core": "workspace:^"
   },
   "devDependencies": {
-    "@adjudicate/core": "^1.1.0",
+    "@adjudicate/core": "^1.6.0",
     "@claustrum/core": "workspace:*",
     "@claustrum/eslint-config": "workspace:*",
     "@types/node": "^22.0.0",

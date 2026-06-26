@@ -29,7 +29,7 @@
     "pgvector": "^0.2.0"
   },
   "peerDependencies": {
-    "@adjudicate/core": "^1.1.0"
+    "@adjudicate/core": "^1.6.0"
   },
   "devDependencies": {
     "@claustrum/eslint-config": "workspace:*",
