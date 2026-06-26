@@ -36,8 +36,3 @@ pnpm-debug.log*
 
 # TypeScript build info
 *.tsbuildinfo
-
-# Changeset draft files
-.changeset/*.md
-!.changeset/README.md
-!.changeset/config.json
