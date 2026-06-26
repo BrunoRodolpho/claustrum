@@ -44,8 +44,8 @@ importers:
   examples/healthcare-stub:
     dependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@claustrum/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -66,8 +66,8 @@ importers:
   examples/minimal-chat:
     dependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@anthropic-ai/sdk':
         specifier: ^0.82.0
         version: 0.82.0(zod@4.4.3)
@@ -118,8 +118,8 @@ importers:
   packages/channel-web:
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@claustrum/core':
         specifier: workspace:*
         version: link:../core
@@ -143,8 +143,8 @@ importers:
         version: 5.13.1
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@claustrum/core':
         specifier: workspace:*
         version: link:../core
@@ -198,8 +198,8 @@ importers:
   packages/conformance:
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@claustrum/core':
         specifier: workspace:*
         version: link:../core
@@ -219,8 +219,8 @@ importers:
   packages/core:
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@adjudicate/runtime':
         specifier: ^0.2.0
         version: 0.2.1
@@ -264,8 +264,8 @@ importers:
   packages/grounding-pgvector:
     dependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@claustrum/core':
         specifier: workspace:*
         version: link:../core
@@ -305,8 +305,8 @@ importers:
         version: 5.11.0
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.1.0
-        version: 1.3.0
+        specifier: ^1.6.0
+        version: 1.6.0
       '@claustrum/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
@@ -355,8 +355,14 @@ packages:
   '@adjudicate/canonical@1.1.0':
     resolution: {integrity: sha512-A6MLroiqY/WYSUzMYgjoAolls9XKfN1dRwBxv3xCLM+XVmBJn1YursFgiycrUuEbFPC8NTId9WXYc+JMaVy2LA==}
 
+  '@adjudicate/canonical@1.2.0':
+    resolution: {integrity: sha512-LYl/1tabzRrkEeqFMOpvulyh1YdHbBC8qwlH7X8U/hdfCQ8TMxdlIfb95gNWqDokjCOCRT5Ev64iSRhaGzCIQg==}
+
   '@adjudicate/core@1.3.0':
     resolution: {integrity: sha512-fWPCE5YeroQHZj5GNYqigQ/Uv3e3LVZJ9ahvYDrR+oJZFDkExkgvxlpf7NxP3mq2GHaJzPtaFeVGjfJ4cVpXug==}
+
+  '@adjudicate/core@1.6.0':
+    resolution: {integrity: sha512-YeA+sfk0aX1T2r4faCPFQgg+OJF4D3zfqpSJ9hgIy8DgNRY549d08mVP4DvZqV2NUpUidgERWhQmDLWKAAZvSA==}
 
   '@adjudicate/runtime@0.2.1':
     resolution: {integrity: sha512-/Z2nhfCVSk2VD/0SXBoO1Yl/sIIm5c3wHbblFQd+wE3iVWK0FWn9+I3HvRiTMzwOfeDK+RVA/dlpP0JbzeCwuQ==}
@@ -2814,9 +2820,19 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.8.0
 
+  '@adjudicate/canonical@1.2.0':
+    dependencies:
+      '@noble/hashes': 1.8.0
+
   '@adjudicate/core@1.3.0':
     dependencies:
       '@adjudicate/canonical': 1.1.0
+      '@noble/hashes': 1.8.0
+      zod: 4.4.3
+
+  '@adjudicate/core@1.6.0':
+    dependencies:
+      '@adjudicate/canonical': 1.2.0
       '@noble/hashes': 1.8.0
       zod: 4.4.3
 

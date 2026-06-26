@@ -9,7 +9,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@adjudicate/core": "^1.1.0",
+    "@adjudicate/core": "^1.6.0",
     "@anthropic-ai/sdk": "^0.82.0",
     "@claustrum/anthropic": "workspace:*",
     "@claustrum/core": "workspace:*",

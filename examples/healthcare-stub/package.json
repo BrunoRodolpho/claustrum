@@ -9,7 +9,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@adjudicate/core": "^1.1.0",
+    "@adjudicate/core": "^1.6.0",
     "@claustrum/core": "workspace:*",
     "zod": "^4.3.6"
   },
