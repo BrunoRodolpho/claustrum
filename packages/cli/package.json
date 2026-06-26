@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "claustrum runtime CLI — scaffold adopters, replay turns, run the conformance suite.",
   "license": "MIT",
   "type": "module",
