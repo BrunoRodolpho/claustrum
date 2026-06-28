@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/memory-postgres",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Postgres + Redis MemoryProvider for @claustrum/core. Hot-cache snapshot, write-through invalidation, operational-memory boundary via Adjudicator.",
   "license": "MIT",
   "type": "module",

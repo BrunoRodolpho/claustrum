@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/grounding-pgvector",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "GroundingProvider adapter — pgvector-backed RAG retrieval with content-addressed, canonical-hash grounding proofs.",
   "license": "MIT",
   "type": "module",
