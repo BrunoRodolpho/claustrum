@@ -1,7 +1,7 @@
 {
   "name": "claustrum",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "description": "Governance-native conversational runtime — the conductor of the cortical orchestra (Crick & Koch 2005). Built on @adjudicate/core.",
   "license": "MIT",
   "type": "module",

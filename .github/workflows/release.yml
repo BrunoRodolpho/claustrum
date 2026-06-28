@@ -47,3 +47,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # setup-node (registry-url) writes a temp .npmrc and points
+          # NPM_CONFIG_USERCONFIG at it with `_authToken=${NODE_AUTH_TOKEN}`.
+          # pnpm reads THAT file, so the real token must arrive via
+          # NODE_AUTH_TOKEN — without it the setup-node placeholder is sent and
+          # npm rejects the publish with E404. (Same fix as adjudicate.)
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
