@@ -77,6 +77,23 @@ export interface ConductorOptions {
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
   /**
+   * Per-turn wall clock for the Claims Kernel freshness window (SDD §G `fetchedAt`
+   * is a TIMESTAMP — "cache cannot masquerade as live"; SDD §E `fresh(e)`; Phase
+   * R · R2). Defaults to `Date.now`.
+   *
+   * The Conductor calls this ONCE per `openCapsule` (i.e. once per turn) and
+   * rebuilds the injected `claimsKernel.soundness` deps with the resulting `now`,
+   * so CLAIMS-VALIDATE evaluates `fresh(e)` against the CURRENT time each turn
+   * rather than a value frozen at boot. Without this seam the injected
+   * `soundness.now` (a number captured at boot) is spread into every per-turn
+   * capsule and stale evidence reads as fresh forever.
+   *
+   * The clock is a FUNCTION here only — at the kernel boundary `now` stays a pure
+   * `number` (SDD §R kernel purity / Hard Rule #1). The per-turn clock seam lives
+   * in CLAUSTRUM (the loop), NEVER in `@adjudicate/core`.
+   */
+  readonly clock?: () => number;
+  /**
    * Per-session lock that serializes concurrent turns for one session
    * (RC-R3 / Decision 1). Defaults to an in-process `InMemorySessionLock`,
    * which is correct for a SINGLE replica only. Multi-process deployments
@@ -178,6 +195,10 @@ export interface Conductor {
 
 export function createConductor(options: ConductorOptions): Conductor {
   const id = options.idFactory ?? randomUUID;
+  // Per-turn freshness clock (Phase R · R2 / SDD §G/§E). Resolved ONCE to the
+  // function reference here; CALLED per `openCapsule` so each turn's claims
+  // soundness deps carry a CURRENT `now`, not a boot-frozen one.
+  const clock: () => number = options.clock ?? Date.now;
   const sessionLock: SessionLock = options.sessionLock ?? new InMemorySessionLock();
   const lockTimeoutMs = options.sessionLockTimeoutMs ?? 10_000;
   // Per-capsule lock handle, released in closeCapsule. WeakMap keeps the
@@ -273,8 +294,24 @@ export function createConductor(options: ConductorOptions): Conductor {
         ...(options.claimPlanner !== undefined
           ? { claimPlanner: options.claimPlanner }
           : {}),
+        // R2a — frozen-freshness-clock fix (SDD §G `fetchedAt` timestamp / §E
+        // `fresh(e)`; Phase R · R2). The injected `claimsKernel.soundness.now` is
+        // a number captured at boot; spreading it as-is would freeze the freshness
+        // window so stale evidence reads as fresh on every later turn. Rebuild the
+        // soundness deps with a PER-TURN `now` from the Conductor's `clock()` seam
+        // (called here, once per turn) so CLAIMS-VALIDATE evaluates `fresh(e)`
+        // against the CURRENT time. The kernel still receives `now: number`
+        // (purity preserved — only ConductorOptions carries the function).
         ...(options.claimsKernel !== undefined
-          ? { claimsKernel: options.claimsKernel }
+          ? {
+              claimsKernel: {
+                ...options.claimsKernel,
+                soundness: {
+                  ...options.claimsKernel.soundness,
+                  now: clock(),
+                },
+              },
+            }
           : {}),
         tools: options.tools,
         channels,

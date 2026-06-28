@@ -65,6 +65,15 @@ export async function runClaimsValidate(
   const candidates: ReadonlyArray<CandidateClaim> =
     await capsule.claimPlanner.propose({ cognition, plan });
 
+  // EMPTY candidate set = nothing to assert (a greeting / smalltalk turn).
+  // The pure kernel would map a non-suppressed RENDER terminal with an empty
+  // renderable set to a terminal `UNKNOWN` (kernels.ts §I/§K) — but `UNKNOWN`
+  // is honest ignorance about a REQUESTED claim, NOT "there was nothing to
+  // claim" (SDD §I/§K). Returning no claims result here keeps the turn from
+  // carrying a spurious claims-`UNKNOWN`; the stage is byte-equivalent to an
+  // unwired pipeline for a turn with no candidate claims.
+  if (candidates.length === 0) return undefined;
+
   const deps: ClaimsKernelDeps = capsule.claimsKernel;
 
   // P1 ∘ P2 over the threaded snapshot. PURE: same ledger + candidates + deps ⟹
