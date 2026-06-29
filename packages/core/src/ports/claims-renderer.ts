@@ -13,6 +13,14 @@
  * still come from the draft). The rendered text still passes the OUTPUT FIREWALL
  * (defense in depth) before egress.
  *
+ * RENDER IS SOLE AUTHOR ON THE RENDERED PATH (Plan 1 Phase 3 / F6): once wired and
+ * a claims result exists, the model responder draft NEVER reaches the customer —
+ * the supersession is UNCONDITIONAL. A degenerate/EMPTY render does NOT fall back
+ * to the operational responder draft; the loop emits a proposition-free SAFE
+ * TERMINAL instead (never model-authored prose, never silence). The renderer is
+ * expected to emit its own non-empty proposition-free safe template for any
+ * non-RENDER terminal; the safe-terminal fallback is only the loop-level backstop.
+ *
  * The renderer is a PURE deterministic template-filler in the adopter (no model,
  * no IO); this port carries only the seam contract. It consumes the published
  * `@adjudicate/core` `ClaimsKernelResult` — the SAME shape CLAIMS-VALIDATE emits
