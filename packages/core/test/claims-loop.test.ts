@@ -510,6 +510,27 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     expect(result.response.text.startsWith("ok:")).toBe(false);
   });
 
+  it("RENDER-FROM-CLAIMS no-renderable-claim FALLBACK: an EMPTY render does NOT override — the operational draft stands (E-2)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    // A renderer that produces NO renderable text (e.g. a degenerate empty
+    // RENDER set). The loop must NOT emit empty text — the responder draft is
+    // the fallback (never silence on the rendered path).
+    const claimsRenderer: ClaimsRendererPort = {
+      render: () => ({ text: "   " }),
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    // The reply fell back to the operational model draft ("ok: …"), NOT empty.
+    expect(result.response.text.trim()).not.toBe("");
+    expect(result.response.text.startsWith("ok:")).toBe(true);
+  });
+
   it("RENDER-FROM-CLAIMS non-vacuity: WITHOUT a claimsRenderer the model draft text stands (byte-identical)", async () => {
     const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
     const claimPlanner = fixedClaimPlanner([

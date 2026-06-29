@@ -209,7 +209,18 @@ export async function handleTurn(
   //     invariant (Hard Rule #3) is preserved.
   if (claims !== undefined && capsule.claimsRenderer !== undefined) {
     const renderedFromClaims = capsule.claimsRenderer.render(claims);
-    draft = { ...draft, text: renderedFromClaims.text };
+    // NO-RENDERABLE-CLAIM FALLBACK (Plan 1 Phase 3 / E-2). Supersede the model
+    // draft's text ONLY when the renderer produced a non-empty render — i.e. a
+    // render of the VALIDATED claim set OR a proposition-free terminal template
+    // (UNKNOWN / ESCALATE / CLARIFY). When the render is empty (no renderable
+    // claim — e.g. a degenerate empty RENDER set), we DO NOT emit empty text:
+    // the operational responder draft stands as the fallback (and still passes
+    // the OUTPUT FIREWALL below). So every byte emitted on the rendered path is
+    // either a render of a VALIDATED claim / an explicit safe-terminal template,
+    // or the operational fallback — never silence, and never an empty override.
+    if (renderedFromClaims.text.trim() !== "") {
+      draft = { ...draft, text: renderedFromClaims.text };
+    }
   }
 
   // 6b. OUTPUT FIREWALL (optional, F1) — gate the draft through the kernel when
