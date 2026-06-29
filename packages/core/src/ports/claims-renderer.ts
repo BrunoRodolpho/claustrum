@@ -28,11 +28,32 @@ export interface ClaimsRenderResult {
 }
 
 /**
+ * The per-turn REQUEST context the renderer may use for the §O#15 required-claim
+ * completeness gate (Plan 1 Phase 3 / F2). The kernel `ClaimsKernelResult` carries
+ * the per-claim verdicts but NOT the original request, so a renderer that must
+ * decide "was every REQUIRED companion of THIS request validated?" needs the
+ * request surface. Optional + structural — the loop supplies it; a renderer that
+ * does no completeness gating ignores it (byte-identical). The renderer stays a
+ * PURE deterministic function of `(claims, context)`; this carries no clock/RNG.
+ */
+export interface ClaimsRenderContext {
+  /** The raw inbound request text (the §O#8 span-segmenter input the adopter
+   *  classifies into span-classes for the §O#15 required-claim decomposer). */
+  readonly requestText?: string;
+}
+
+/**
  * Render the reply from this turn's `ClaimsKernelResult` (the renderable set +
- * terminal). MUST be PURE/deterministic — same result ⟹ same text — and assert
- * NO domain fact that is not backed by a VALIDATED claim (Inv 6); a non-RENDER
- * terminal renders a proposition-free safe template (the adopter enforces this).
+ * terminal). MUST be PURE/deterministic — same `(result, context)` ⟹ same text —
+ * and assert NO domain fact that is not backed by a VALIDATED claim (Inv 6); a
+ * non-RENDER terminal renders a proposition-free safe template (the adopter
+ * enforces this). `context` (optional) carries the per-turn request surface for
+ * the §O#15 required-claim completeness gate (F2); a renderer that does not gate
+ * may ignore it.
  */
 export interface ClaimsRendererPort {
-  render(claims: ClaimsKernelResult): ClaimsRenderResult;
+  render(
+    claims: ClaimsKernelResult,
+    context?: ClaimsRenderContext,
+  ): ClaimsRenderResult;
 }

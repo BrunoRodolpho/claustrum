@@ -104,6 +104,7 @@ export {
   runClaimsValidate,
 } from "./claims-loop/index.js";
 export type {
+  ClaimsRenderContext,
   ClaimsRendererPort,
   ClaimsRenderResult,
 } from "./ports/claims-renderer.js";

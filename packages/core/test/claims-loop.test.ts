@@ -510,14 +510,15 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     expect(result.response.text.startsWith("ok:")).toBe(false);
   });
 
-  it("RENDER-FROM-CLAIMS no-renderable-claim FALLBACK: an EMPTY render does NOT override — the operational draft stands (E-2)", async () => {
+  it("RENDER-FROM-CLAIMS empty-render SAFE-TERMINAL: a degenerate EMPTY render falls back to a proposition-free safe terminal, NOT the model draft (F6)", async () => {
     const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
     const claimPlanner = fixedClaimPlanner([
       soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
     ]);
     // A renderer that produces NO renderable text (e.g. a degenerate empty
-    // RENDER set). The loop must NOT emit empty text — the responder draft is
-    // the fallback (never silence on the rendered path).
+    // RENDER set). RENDER IS SOLE AUTHOR ON THE RENDERED PATH (F6): the loop must
+    // NOT re-admit the model responder draft — it falls back to a proposition-free
+    // SAFE TERMINAL (GENERIC_REFUSAL_TEXT), never the model prose, never silence.
     const claimsRenderer: ClaimsRendererPort = {
       render: () => ({ text: "   " }),
     };
@@ -526,9 +527,30 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     const result = await runTurn(conductor);
 
     expect(result.claims).toBeDefined();
-    // The reply fell back to the operational model draft ("ok: …"), NOT empty.
+    // Never empty, and NEVER the model draft ("ok: …") — the safe terminal stands.
     expect(result.response.text.trim()).not.toBe("");
-    expect(result.response.text.startsWith("ok:")).toBe(true);
+    expect(result.response.text.startsWith("ok:")).toBe(false);
+  });
+
+  it("RENDER-FROM-CLAIMS receives the request context (F2 §O#15 completeness gate)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let seenRequestText: string | undefined = "UNSET";
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        seenRequestText = context?.requestText;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    await runTurn(conductor);
+
+    // The loop threads the inbound request surface into the renderer so it can
+    // run the §O#15 required-claim completeness gate over THIS request.
+    expect(seenRequestText).toBe("por que meu pedido está atrasado?");
   });
 
   it("RENDER-FROM-CLAIMS non-vacuity: WITHOUT a claimsRenderer the model draft text stands (byte-identical)", async () => {
