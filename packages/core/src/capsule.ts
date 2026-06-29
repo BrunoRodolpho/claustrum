@@ -28,6 +28,7 @@ import type {
 } from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind } from "./ports/channel.js";
 import type { ClaimPlannerPort } from "./ports/claim-planner.js";
+import type { ClaimsRendererPort } from "./ports/claims-renderer.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
@@ -104,6 +105,14 @@ export interface Capsule {
    * policy of its own. Required (with `claimPlanner`) for CLAIMS-VALIDATE to run.
    */
   readonly claimsKernel?: ClaimsKernelDeps;
+  /**
+   * Optional render-from-claims seam (SDD §B / §Q.7). When wired AND
+   * CLAIMS-VALIDATE produced a result, `handleTurn` renders the reply TEXT
+   * deterministically from the validated claims (the "claims-not-prose" thesis),
+   * superseding the model draft's text. Absent → the model-responder reply
+   * (byte-identical). The deterministic renderer lives DOWNSTREAM (ibatexas).
+   */
+  readonly claimsRenderer?: ClaimsRendererPort;
   readonly tools: ToolRegistry;
   readonly channels: ChannelMap;
   readonly responder: ResponderPort;

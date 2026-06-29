@@ -187,7 +187,7 @@ export async function handleTurn(
   }
 
   // 6. SYNTHESIZE — produce the user-facing reply.
-  const draft = await capsule.responder.respond({
+  let draft = await capsule.responder.respond({
     cognition,
     decision,
     plan,
@@ -196,6 +196,21 @@ export async function handleTurn(
       ? { voice: capsule.tenant.voice }
       : {}),
   });
+
+  // 6a. RENDER-FROM-CLAIMS (optional, SDD §B / §J.6 / §O#3 / §Q.7) — the
+  //     "claims-not-prose" thesis at the loop level. When the CLAIMS-VALIDATE
+  //     stage produced a result AND a `claimsRenderer` is wired, the reply TEXT
+  //     is rendered DETERMINISTICALLY from the validated claims + turn terminal —
+  //     superseding the model draft's text (no model-authored customer prose).
+  //     Artifacts / usage still come from the draft, and the rendered text still
+  //     passes the OUTPUT FIREWALL below (defense in depth). Byte-identical when
+  //     unwired (no claims result, or no renderer) — the legacy reply stands.
+  //     This is NOT a mutation verb (no `adjudicate()` call), so the once-per-turn
+  //     invariant (Hard Rule #3) is preserved.
+  if (claims !== undefined && capsule.claimsRenderer !== undefined) {
+    const renderedFromClaims = capsule.claimsRenderer.render(claims);
+    draft = { ...draft, text: renderedFromClaims.text };
+  }
 
   // 6b. OUTPUT FIREWALL (optional, F1) — gate the draft through the kernel when
   //     the adopter wired `adjudicateOutput` AND the tenant flag is on. This is

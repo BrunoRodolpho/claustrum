@@ -47,6 +47,7 @@ import {
   type CapabilityId,
   type ChannelMessage,
   type ClaimPlannerPort,
+  type ClaimsRendererPort,
   type IntentKind,
   type InvestigatorPort,
   type Plan,
@@ -218,6 +219,7 @@ interface BundleOpts {
   readonly investigator?: InvestigatorPort;
   readonly claimPlanner?: ClaimPlannerPort;
   readonly withKernelDeps?: boolean;
+  readonly claimsRenderer?: ClaimsRendererPort;
 }
 
 function makeBundle(opts: BundleOpts) {
@@ -243,6 +245,7 @@ function makeBundle(opts: BundleOpts) {
     ...(opts.investigator !== undefined ? { investigator: opts.investigator } : {}),
     ...(opts.claimPlanner !== undefined ? { claimPlanner: opts.claimPlanner } : {}),
     ...(opts.withKernelDeps !== false ? { claimsKernel } : {}),
+    ...(opts.claimsRenderer !== undefined ? { claimsRenderer: opts.claimsRenderer } : {}),
   });
   return { adjudicator, session, channel, executed, conductor };
 }
@@ -485,5 +488,39 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
 
     expect(investigator.investigateCalls).toBe(1);
     expect(result.claims).toBeUndefined();
+  });
+
+  it("RENDER-FROM-CLAIMS: a wired claimsRenderer SUPERSEDES the model draft's text (claims-not-prose)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    // A deterministic renderer that echoes the kernel terminal — proves the reply
+    // came FROM the claims result, not the model responder ("ok: …").
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims) => ({ text: `RENDERED[${claims.terminal}]` }),
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    // The reply is the deterministic claims render, NOT the model draft "ok: …".
+    expect(result.response.text).toBe(`RENDERED[${result.claims?.terminal ?? ""}]`);
+    expect(result.response.text.startsWith("ok:")).toBe(false);
+  });
+
+  it("RENDER-FROM-CLAIMS non-vacuity: WITHOUT a claimsRenderer the model draft text stands (byte-identical)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    // Same pipeline, NO renderer wired → the legacy model-responder reply stands.
+    const { conductor } = makeBundle({ investigator, claimPlanner });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    expect(result.response.text.startsWith("ok:")).toBe(true);
   });
 });
