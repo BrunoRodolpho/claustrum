@@ -17,4 +17,10 @@ raw `string`.
 
 This is E-1 (brand carrier + retyped signatures) only. Call-site value-binding
 (E-2) and the upstream `RenderedResponse.text` string→`RenderedReply` flip are
-later waves (W5/W6). Requires `@adjudicate/core` ≥ 1.7.0 (the minter set).
+later waves (W5/W6).
+
+Requires `@adjudicate/core` >= 1.8.0 — the version that actually exports the
+minter set (`mintRenderedReply` / `unwrapRendered` / `wrapLegacyResponderText`
+et al.). The `@adjudicate/core` dependency AND peerDependency ranges are pinned
+to `^1.8.0` accordingly. This minor changeset bumps `@claustrum/channel-whatsapp`
+0.2.0 -> 0.3.0 (the real publish target).
