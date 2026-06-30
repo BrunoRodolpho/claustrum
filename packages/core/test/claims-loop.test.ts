@@ -44,6 +44,7 @@ import {
   createConductor,
   createToolRegistry,
   handleTurn,
+  runClaimsValidate,
   type CapabilityId,
   type ChannelMessage,
   type ClaimPlannerPort,
@@ -579,5 +580,72 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
 
     expect(result.claims).toBeDefined();
     expect(result.response.text.startsWith("ok:")).toBe(true);
+  });
+
+  it("F2 safe-degrade: a claim-planner that THROWS (e.g. Ollama tool-call XML parse error) → no claims, turn proceeds safe (never throws out of the turn)", async () => {
+    // The claim planner is the one probabilistic step in CLAIMS-VALIDATE. A live
+    // 4B model raised an Ollama tool-call XML parse error ("element <parameter>…")
+    // on ~1/3 of turns; `propose` rejects. The stage must DEGRADE SAFE: catch the
+    // failure, emit no claims, and let the turn fall through to the legacy
+    // responder/safe path — NOT throw out of the turn, NOT fabricate a claim.
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    let proposeCalls = 0;
+    const throwingClaimPlanner: ClaimPlannerPort = {
+      async propose(): Promise<ReadonlyArray<CandidateClaim>> {
+        proposeCalls += 1;
+        throw new Error(
+          'invalid tool call: unexpected XML element <parameter> in completion',
+        );
+      },
+    };
+    // A renderer is wired too — to prove that even with the claims-render path
+    // available, a degraded (undefined) claims result leaves the model draft to
+    // stand rather than rendering from a fabricated/empty claim set.
+    const claimsRenderer: ClaimsRendererPort = {
+      render() {
+        throw new Error("renderer must NOT run when claims degraded to undefined");
+      },
+    };
+    const { conductor } = makeBundle({
+      investigator,
+      claimPlanner: throwingClaimPlanner,
+      claimsRenderer,
+    });
+
+    // The turn must RESOLVE (not reject): the planner error degrades safe.
+    const result = await runTurn(conductor);
+
+    expect(proposeCalls).toBe(1); // the failing model call was actually attempted
+    // No claims result was produced — byte-equivalent to an unwired pipeline.
+    expect(result.claims).toBeUndefined();
+    // The turn proceeded on the legacy responder/safe path — no fabrication.
+    expect(result.response.text.startsWith("ok:")).toBe(true);
+  });
+
+  it("F2 unit: runClaimsValidate returns undefined when claimPlanner.propose throws (degrade safe, no rethrow)", async () => {
+    // Direct unit over the stage seam: a throwing planner must yield `undefined`
+    // (the safe fall-through signal), never a rejected promise and never a claim.
+    const ledger = new EvidenceLedger("turn-f2-unit");
+    ledger.record(stageEntry("stage:order-1"));
+    const capsule = {
+      customerId: CUSTOMER,
+      claimsKernel,
+      claimPlanner: {
+        async propose(): Promise<ReadonlyArray<CandidateClaim>> {
+          throw new Error('element <parameter> parse error');
+        },
+      },
+    } as unknown as Parameters<typeof runClaimsValidate>[0];
+    const cognition = {
+      turnId: "turn-f2-unit",
+      perception: { text: "por que meu pedido está atrasado?" },
+    } as unknown as Parameters<typeof runClaimsValidate>[1];
+    const plan = { envelopes: [], rationale: "x" } as unknown as Parameters<
+      typeof runClaimsValidate
+    >[2];
+
+    await expect(
+      runClaimsValidate(capsule, cognition, plan, ledger),
+    ).resolves.toBeUndefined();
   });
 });

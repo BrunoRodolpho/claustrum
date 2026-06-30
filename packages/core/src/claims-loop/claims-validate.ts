@@ -69,8 +69,32 @@ export async function runClaimsValidate(
     return undefined;
   }
 
-  const candidates: ReadonlyArray<CandidateClaim> =
-    await capsule.claimPlanner.propose({ cognition, plan });
+  // CLAIM-PLANNER CALL — the ONE probabilistic step in this otherwise-deterministic
+  // stage: the claim planner is model-backed, so `propose` can THROW on a model /
+  // tool-call failure (e.g. an Ollama tool-call XML parse error: `element
+  // <parameter>…`). A planner failure is NOT evidence of anything — it must DEGRADE
+  // SAFE, never escape the turn. Catch it, log it, and return `undefined`: no
+  // candidate claims → no claims result → the turn falls through to the existing
+  // responder / safe path (handle-turn step 6, byte-equivalent to an unwired
+  // pipeline), exactly as for an empty candidate set below. We do NOT fabricate a
+  // claim, do NOT emit a partial/garbage candidate from a failed parse, and do NOT
+  // map the failure to a spurious claims-`UNKNOWN` terminal — a planner that could
+  // not produce candidates asserted nothing, so the turn asserts nothing.
+  let candidates: ReadonlyArray<CandidateClaim>;
+  try {
+    candidates = await capsule.claimPlanner.propose({ cognition, plan });
+  } catch (error) {
+    // DEGRADE SAFE — the planner could not produce candidates this turn. Surface
+    // a single diagnostic (no logger/telemetry channel exists for a degraded
+    // sub-stage; the output-firewall catch is likewise silent) and return
+    // `undefined`. Returning here — rather than rethrowing or fabricating — keeps
+    // the turn alive on the legacy responder/safe path.
+    console.warn(
+      "[claims-validate] claim-planner propose failed; degrading to no-claims (safe fall-through):",
+      error instanceof Error ? error.message : String(error),
+    );
+    return undefined;
+  }
 
   // EMPTY candidate set = nothing to assert (a greeting / smalltalk turn).
   // The pure kernel would map a non-suppressed RENDER terminal with an empty
