@@ -18,6 +18,7 @@
 import type {
   ClaimsKernelDeps,
   Decision,
+  EvidenceLedger,
   IntentEnvelope,
 } from "@adjudicate/core";
 import type {
@@ -55,6 +56,32 @@ import type { ToolRegistry } from "./tools/registry.js";
  * the exhaustive union check when new channel kinds are added.
  */
 export type ChannelMap = Partial<Readonly<Record<ChannelKind, ChannelDriver>>>;
+
+/**
+ * Per-turn Claims-Kernel deps builder (SDD §F / §Q.3; the W5b conductor seam).
+ *
+ * The published `ClaimsKernelDeps` threaded onto the Capsule is a PROCESS-WIDE
+ * value, but two of its soundness capabilities are genuinely PER-TURN: `owns`
+ * (the owner-scoped resource set this turn's authenticated customer actually
+ * read) and `outcomeConfirmed`. The conductor's existing per-turn rebuild only
+ * refreshes `now`; this seam lets an adopter rebuild the FULL deps for the turn,
+ * derived ONLY from the threaded read-only Evidence Ledger + the AUTHENTICATED
+ * `customerId` — NEVER a session/model-supplied id (IDOR stays closed: "no owner"
+ * ≠ "any owner"). It receives `base` (the deps with the per-turn `now` already
+ * floored — see CLAIMS-VALIDATE) and returns the reconciled deps.
+ *
+ * PURE at the kernel boundary: it returns plain `ClaimsKernelDeps` (the `owns` /
+ * `outcomeConfirmed` predicates + numeric `now`), so the kernel still composes a
+ * pure value. Absent → the static `base` is used (byte-identical to today).
+ */
+export type ClaimsKernelDepsForTurn = (args: {
+  /** This turn's threaded, read-only Evidence Ledger (INVESTIGATE output). */
+  readonly ledger: EvidenceLedger;
+  /** The AUTHENTICATED customer for this turn (the conductor identity). */
+  readonly customerId: string;
+  /** The process-wide deps with the per-turn `now` already floored. */
+  readonly base: ClaimsKernelDeps;
+}) => ClaimsKernelDeps;
 
 export interface Capsule {
   // ── Identity ──────────────────────────────────────────────────────────────
@@ -105,6 +132,16 @@ export interface Capsule {
    * policy of its own. Required (with `claimPlanner`) for CLAIMS-VALIDATE to run.
    */
   readonly claimsKernel?: ClaimsKernelDeps;
+  /**
+   * Optional per-turn Claims-Kernel deps builder (the W5b conductor seam — see
+   * {@link ClaimsKernelDepsForTurn}). When wired, CLAIMS-VALIDATE invokes it
+   * post-INVESTIGATE / pre-kernel to rebuild `owns` / `outcomeConfirmed` from
+   * THIS turn's owner-scoped ledger reads + the authenticated `customerId`, so an
+   * owner-scoped ORDER/PAYMENT claim can VALIDATE for the legit owner (the
+   * process-wide `claimsKernel` boot-empty owner set fails it shut otherwise).
+   * Absent → the static `claimsKernel` deps are used (byte-identical).
+   */
+  readonly claimsKernelDepsForTurn?: ClaimsKernelDepsForTurn;
   /**
    * Optional render-from-claims seam (SDD §B / §Q.7). When wired AND
    * CLAIMS-VALIDATE produced a result, `handleTurn` renders the reply TEXT

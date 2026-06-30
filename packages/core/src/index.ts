@@ -16,7 +16,11 @@ export {
   type LockKeyStrategy,
   type OpenCapsuleInput,
 } from "./conductor.js";
-export type { Capsule, ChannelMap } from "./capsule.js";
+export type {
+  Capsule,
+  ChannelMap,
+  ClaimsKernelDepsForTurn,
+} from "./capsule.js";
 export { handleTurn, type TurnResult } from "./handle-turn.js";
 
 // ── Dispatch ───────────────────────────────────────────────────────────────

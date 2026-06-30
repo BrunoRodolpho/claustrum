@@ -81,7 +81,7 @@ function stageEntry(key: string): EvidenceEntryInput {
     fetchedAt: NOW_MS,
     sourceMode: "live",
     taint: "TRUSTED",
-    originProvenance: "TRUSTED",
+    originProvenance: "FIRST_PARTY",
   };
 }
 
@@ -102,6 +102,20 @@ function soundCandidate(key: string, type: string): CandidateClaim {
       kind: "read_claim",
       actor: { customerId: CUSTOMER },
       resources: { [key]: ORDER },
+      // W6 falsifier-completeness eligibility (≥ @adjudicate/core 1.8.0): a claim
+      // VALIDATEs only if its type ENUMERATED how it could be falsified. The
+      // falsifier key is never recorded into the ledger → the runtime arm never
+      // fires → the claim still reaches VALIDATED (the property under test).
+      falsifierComplete: true,
+      falsifiers: [
+        {
+          key: `${key}:falsifier`,
+          ownershipPolicy: "required",
+          freshnessPolicy: "must_read_this_turn",
+          sourceIntegrity: "trusted_service",
+          provenancePolicy: "preserve",
+        },
+      ],
     },
     subject: ORDER,
     type,
