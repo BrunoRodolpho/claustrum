@@ -24,17 +24,35 @@
  * stage runs (the legacy loop is byte-equivalent).
  */
 
-import type { CandidateClaim } from "@adjudicate/core";
+import type { CandidateClaim, EvidenceLedger } from "@adjudicate/core";
 import type { CognitiveState, Plan } from "./planner.js";
 
 /**
  * What the claim planner sees. The resolved cognition + (post-RESOLVE) plan for
  * this turn — the same inputs the planner framed against — so the candidate
  * claims align with the proposed intents.
+ *
+ * It ALSO carries the two AUTHENTICATED, owner-scoped inputs the loop holds (and
+ * the model must NEVER author), so an owner-scoped candidate is framed from the
+ * authenticated identity / owner-scoped reads rather than the model's
+ * self-assertion (IDOR-safe — SDD §E C1; Inv 2):
+ *   - `customerId` — the AUTHENTICATED principal for this turn (`capsule.customerId`),
+ *     the SAME principal CLAIMS-VALIDATE's per-turn `owns` quantifies over. The
+ *     claim planner stamps candidate actors from THIS, never a model/session
+ *     self-reported actor.
+ *   - `ledger`     — this turn's read-only Evidence Ledger AFTER INVESTIGATE, so the
+ *     planner can resolve an owner-scoped claim SUBJECT from the owner-scoped reads
+ *     that resolved PRESENT this turn (never a model/session-supplied resource id).
+ * Both are OPTIONAL (additive): a planner that ignores them, or an adopter that
+ * never wired them, is byte-identical to the prior `{ cognition, plan }` contract.
  */
 export interface ClaimPlannerInput {
   readonly cognition: CognitiveState;
   readonly plan: Plan;
+  /** The AUTHENTICATED principal for this turn (`capsule.customerId`). */
+  readonly customerId?: string;
+  /** This turn's read-only Evidence Ledger (post-INVESTIGATE). */
+  readonly ledger?: EvidenceLedger;
 }
 
 export interface ClaimPlannerPort {

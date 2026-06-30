@@ -82,7 +82,17 @@ export async function runClaimsValidate(
   // not produce candidates asserted nothing, so the turn asserts nothing.
   let candidates: ReadonlyArray<CandidateClaim>;
   try {
-    candidates = await capsule.claimPlanner.propose({ cognition, plan });
+    // Thread the AUTHENTICATED principal + this turn's read-only ledger to the
+    // claim planner so an owner-scoped candidate's actor + subject derive from the
+    // authenticated identity / owner-scoped reads, NEVER the model's self-assertion
+    // (IDOR-safe — SDD §E C1, Inv 2). INVESTIGATE (step 4b) already populated the
+    // ledger, so the planner sees the owner-scoped reads that resolved PRESENT.
+    candidates = await capsule.claimPlanner.propose({
+      cognition,
+      plan,
+      customerId: capsule.customerId,
+      ledger,
+    });
   } catch (error) {
     // DEGRADE SAFE — the planner could not produce candidates this turn. Surface
     // a single diagnostic (no logger/telemetry channel exists for a degraded
