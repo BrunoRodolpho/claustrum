@@ -147,6 +147,67 @@ function unsoundCandidate(key: string, type: string): CandidateClaim {
   };
 }
 
+/**
+ * A present, FIRST_PARTY, CACHEABLE evidence entry (e.g. STORE_OPEN_NOW's
+ * schedule read) with a CALLER-SET `fetchedAt`. `sourceMode: "cache"` is the
+ * faithful stamp for a cacheable read — the regression is precisely that this is
+ * NOT `"live"`, so the old live-only floor never raised `now` for it.
+ */
+function cacheableEntry(key: string, fetchedAt: number): EvidenceEntryInput {
+  return {
+    key,
+    value: "open",
+    source: "ScheduleProjection",
+    fetchedAt,
+    sourceMode: "cache",
+    taint: "TRUSTED",
+    originProvenance: "FIRST_PARTY",
+  };
+}
+
+/**
+ * A candidate requiring a single CACHEABLE(ttl) first-party read. It VALIDATEs
+ * iff the kernel's cacheable freshness check passes (`0 <= now - fetchedAt <=
+ * ttl`); freshness is the ONLY differentiating conjunct (ownership injected
+ * true, integrity met, provenance preserved, falsifier-complete).
+ */
+function cacheableCandidate(
+  key: string,
+  type: string,
+  ttl: number,
+): CandidateClaim {
+  return {
+    soundness: {
+      requiredEvidence: [
+        {
+          key,
+          ownershipPolicy: "required",
+          freshnessPolicy: { kind: "cacheable", ttl },
+          sourceIntegrity: "trusted_service",
+          provenancePolicy: "preserve",
+        },
+      ],
+      minSourceIntegrity: "trusted_service",
+      kind: "read_claim",
+      actor: { customerId: CUSTOMER },
+      resources: { [key]: ORDER },
+      falsifierComplete: true,
+      falsifiers: [
+        {
+          key: `${key}:falsifier`,
+          ownershipPolicy: "required",
+          freshnessPolicy: { kind: "cacheable", ttl },
+          sourceIntegrity: "trusted_service",
+          provenancePolicy: "preserve",
+        },
+      ],
+    },
+    subject: ORDER,
+    type,
+    value: "open",
+  };
+}
+
 // The injected Claims-Kernel deps (Q3 soundness + default Q4 table). `now` is
 // fixed so `fresh(e)` is deterministic — no wall clock in a test.
 const claimsKernel: ClaimsKernelDeps = {
@@ -647,5 +708,84 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     await expect(
       runClaimsValidate(capsule, cognition, plan, ledger),
     ).resolves.toBeUndefined();
+  });
+
+  it("FRESHNESS FLOOR (a): a SAME-TURN cacheable first-party read (fetchedAt slightly AFTER frozen now) is floored → VALIDATES (the STORE_OPEN_NOW regression fix)", async () => {
+    // THE REGRESSION: the Conductor freezes `now` at openCapsule (turn START);
+    // the investigator then stamps a CACHEABLE first-party read (STORE_OPEN_NOW's
+    // schedule, freshnessPolicy {cacheable, ttl}) with `fetchedAt = Date.now()` a
+    // few ms LATER → `fetchedAt > now`. The OLD live-only floor never raised `now`
+    // for a `sourceMode: "cache"` entry, so the kernel's cacheable check saw
+    // `age = now - fetchedAt < 0` → UNKNOWN. The generalized floor raises `now` to
+    // the newest SAME-TURN first-party `fetchedAt` (live OR cacheable) → age 0 →
+    // PASS → VALIDATED.
+    //
+    // NON-VACUITY: revert claims-validate.ts step (1) to `sourceMode === "live"`
+    // only and this entry (sourceMode "cache", fetchedAt > now) stops raising the
+    // floor → age < 0 → terminal UNKNOWN → these assertions go RED.
+    const ledger = new EvidenceLedger("turn-floor-a");
+    ledger.record(cacheableEntry("schedule:store", NOW_MS + 5));
+    const capsule = {
+      customerId: CUSTOMER,
+      claimsKernel, // now = NOW_MS, frozen at turn start (BEFORE the read stamp)
+      claimPlanner: fixedClaimPlanner([
+        cacheableCandidate("schedule:store", "STORE_OPEN_NOW", 3600),
+      ]),
+    } as unknown as Parameters<typeof runClaimsValidate>[0];
+    const cognition = {
+      turnId: "turn-floor-a",
+      perception: { text: "vocês estão abertos agora?" },
+    } as unknown as Parameters<typeof runClaimsValidate>[1];
+    const plan = { envelopes: [], rationale: "x" } as unknown as Parameters<
+      typeof runClaimsValidate
+    >[2];
+
+    const result = await runClaimsValidate(capsule, cognition, plan, ledger);
+
+    expect(result).toBeDefined();
+    expect(result!.perClaim).toEqual([
+      { subject: ORDER, type: "STORE_OPEN_NOW", verdict: "VALIDATED" },
+    ]);
+    expect(result!.terminal).toBe("RENDER");
+  });
+
+  it("FRESHNESS FLOOR (b): a genuinely-STALE cached entry (fetchedAt ≪ now, age > ttl) is NOT rescued by the floor → demotes to UNKNOWN (no masking)", async () => {
+    // HARD GUARD: the floor must NEVER mask a stale cache. The predicate is
+    // `fetchedAt > frozenNow`, so an OLD cache (`fetchedAt ≪ now`) is EXCLUDED → it
+    // cannot raise `now` → its age stays large → the kernel cacheable check
+    // (`age > ttl`) demotes it to UNKNOWN exactly as before. The floor only ever
+    // absorbs the few-ms same-turn clock skew; it never reaches back to revive a
+    // genuinely stale entry.
+    //
+    // NON-VACUITY: if the floor were (incorrectly) broadened to raise `now` over
+    // ALL present entries regardless of `fetchedAt > now`, this stale entry's
+    // `fetchedAt` could pull `now` down (Math.max wouldn't, but a min/avg bug
+    // would) — this test pins that the stale entry stays UNKNOWN.
+    const TTL = 3600;
+    const ledger = new EvidenceLedger("turn-floor-b");
+    // Fetched 2h ago → age 7200s ≫ ttl, and fetchedAt ≪ frozen now.
+    ledger.record(cacheableEntry("schedule:store", NOW_MS - 7200 * 1000));
+    const capsule = {
+      customerId: CUSTOMER,
+      claimsKernel, // now = NOW_MS
+      claimPlanner: fixedClaimPlanner([
+        cacheableCandidate("schedule:store", "STORE_OPEN_NOW", TTL),
+      ]),
+    } as unknown as Parameters<typeof runClaimsValidate>[0];
+    const cognition = {
+      turnId: "turn-floor-b",
+      perception: { text: "vocês estão abertos agora?" },
+    } as unknown as Parameters<typeof runClaimsValidate>[1];
+    const plan = { envelopes: [], rationale: "x" } as unknown as Parameters<
+      typeof runClaimsValidate
+    >[2];
+
+    const result = await runClaimsValidate(capsule, cognition, plan, ledger);
+
+    expect(result).toBeDefined();
+    expect(result!.perClaim).toEqual([
+      { subject: ORDER, type: "STORE_OPEN_NOW", verdict: "UNKNOWN" },
+    ]);
+    expect(result!.terminal).not.toBe("RENDER");
   });
 });

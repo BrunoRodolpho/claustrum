@@ -21,8 +21,8 @@
  * Capsule; this stage adds NO policy of its own. Between the planner and the
  * kernel it runs a PER-TURN RECONCILIATION over the threaded read-only ledger
  * that only adjusts kernel INPUTS (never a verdict, never a skipped conjunct):
- * (1) it FLOORS `now` up to the newest same-turn LIVE read so a first-party read
- * taken this turn is not future-stale; (2) when wired, it rebuilds the per-turn
+ * (1) it FLOORS `now` up to the newest same-turn first-party read (live OR
+ * cacheable) so a read taken this turn is not future-stale; (2) when wired, it rebuilds the per-turn
  * `owns` / `outcomeConfirmed` from this turn's owner-scoped ledger reads + the
  * authenticated `customerId` (`claimsKernelDepsForTurn`); and (4b) it binds a
  * still-undefined bound candidate's `value` to its PRESENT first-party ledger
@@ -123,31 +123,49 @@ export async function runClaimsValidate(
 
   // (1) FRESHNESS FLOOR — clock-ordering fix (loop-side; the kernel guard is
   //     CORRECT and stays). The Conductor captures the per-turn `now` at
-  //     openCapsule (turn START), BEFORE the investigator stamps each live read's
+  //     openCapsule (turn START), BEFORE the investigator stamps each read's
   //     `fetchedAt = Date.now()`. A SAME-TURN first-party read can thus carry
   //     `fetchedAt > now` by a few ms → the kernel's correct negative-age guard
-  //     (`age >= 0`) rejects it → a valid live read demotes to UNKNOWN. FLOOR
-  //     `now` up to the newest LIVE read's `fetchedAt` so a read taken THIS turn
-  //     is never future-stale. The floor only RAISES `now`, and ONLY over
-  //     `sourceMode === "live"` entries, so it can never mask a genuinely stale
-  //     CACHED entry (an old cache `fetchedAt` < clock-now leaves `now`
-  //     unchanged → its age stays large → still stale). `must_read_this_turn`
-  //     freshness is clock-independent and unaffected.
-  let maxLiveFetchedAt = Number.NEGATIVE_INFINITY;
+  //     (`age >= 0`) rejects it → a valid this-turn read demotes to UNKNOWN.
+  //     FLOOR `now` up to the newest SAME-TURN first-party read's `fetchedAt`
+  //     so a read taken THIS turn is never future-stale.
+  //
+  //     GENERALIZATION (was: `sourceMode === "live"` only). A first-party read
+  //     can legitimately carry a CACHEABLE freshness policy (`sourceMode` ==
+  //     "cache" with a TTL) yet still be READ THIS TURN — e.g. STORE_OPEN_NOW's
+  //     schedule evidence (freshnessPolicy {cacheable, ttl:3600}). Its
+  //     investigator stamp is `fetchedAt ≈ now + ε`, so the live-only floor left
+  //     `now` unraised → the kernel's cacheable freshness check (`age = now -
+  //     fetchedAt; age >= 0 && age <= ttl`) saw `age < 0` → UNKNOWN. So floor
+  //     over ALL PRESENT first-party entries whose `fetchedAt` is AFTER the
+  //     frozen turn-start `now` (= reads taken THIS turn), regardless of
+  //     live-vs-cacheable `sourceMode`.
+  //
+  //     STALE-CACHE SAFETY (load-bearing): the predicate is `fetchedAt >
+  //     frozenNow`. A genuinely-stale CACHED entry has `fetchedAt ≪ now`
+  //     (`fetchedAt < frozenNow`) → it is EXCLUDED → it cannot raise the floor →
+  //     its age stays large → it stays correctly stale / demotes to UNKNOWN. The
+  //     floor only ever RAISES `now` to absorb the few-ms clock skew of
+  //     same-turn reads; it never reaches backwards to rescue an old cache.
+  //     `must_read_this_turn` freshness is clock-independent and unaffected, and
+  //     the kernel negative-age guard is NOT relaxed (it stays in adjudicate).
+  let deps: ClaimsKernelDeps = capsule.claimsKernel;
+  const frozenNow = deps.soundness.now;
+  let maxSameTurnFetchedAt = Number.NEGATIVE_INFINITY;
   for (const key of ledger.keys()) {
     const resolution = ledger.resolve(key);
     if (
       resolution.state === "present" &&
       resolution.entry !== undefined &&
-      resolution.entry.sourceMode === "live" &&
-      resolution.entry.fetchedAt > maxLiveFetchedAt
+      resolution.entry.originProvenance === "FIRST_PARTY" &&
+      resolution.entry.fetchedAt > frozenNow &&
+      resolution.entry.fetchedAt > maxSameTurnFetchedAt
     ) {
-      maxLiveFetchedAt = resolution.entry.fetchedAt;
+      maxSameTurnFetchedAt = resolution.entry.fetchedAt;
     }
   }
-  let deps: ClaimsKernelDeps = capsule.claimsKernel;
-  const flooredNow = Math.max(deps.soundness.now, maxLiveFetchedAt);
-  if (flooredNow !== deps.soundness.now) {
+  const flooredNow = Math.max(frozenNow, maxSameTurnFetchedAt);
+  if (flooredNow !== frozenNow) {
     deps = { ...deps, soundness: { ...deps.soundness, now: flooredNow } };
   }
 
