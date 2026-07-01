@@ -23,13 +23,14 @@
     "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@claustrum/core": "workspace:*"
+  },
   "peerDependencies": {
-    "@adjudicate/core": "^1.6.0",
-    "@claustrum/core": "workspace:^"
+    "@adjudicate/core": "^1.6.0"
   },
   "devDependencies": {
     "@adjudicate/core": "^1.6.0",
-    "@claustrum/core": "workspace:*",
     "@claustrum/eslint-config": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0",
