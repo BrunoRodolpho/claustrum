@@ -1,5 +1,13 @@
 # @claustrum/memory-postgres
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [a005e6f]
+- Updated dependencies [49f9530]
+  - @claustrum/core@0.4.0
+
 ## 0.1.3
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/conformance",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Runtime-side invariant suite for @claustrum/* adopters. Asserts the load-bearing properties of the cognitive loop: tool capability indirection, single-EXECUTE per turn, prompt manifest in trace, REFUSE-renders-text, memory routes via Adjudicator, and few-shot regression parity.",
   "license": "MIT",
   "type": "module",
