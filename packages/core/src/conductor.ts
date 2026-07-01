@@ -19,7 +19,7 @@ import type {
   Decision,
   IntentEnvelope,
 } from "@adjudicate/core";
-import type { Capsule, ChannelMap } from "./capsule.js";
+import type { Capsule, ChannelMap, ClaimsKernelDepsForTurn } from "./capsule.js";
 import type {
   Adjudicator,
   ConfirmationReceipt,
@@ -31,6 +31,7 @@ import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
 import type { InvestigatorPort } from "./ports/investigator.js";
+import type { ClaimsRendererPort } from "./ports/claims-renderer.js";
 import type { MemoryPort } from "./ports/memory.js";
 import type { PlannerPort } from "./ports/planner.js";
 import type { ResolverPort } from "./ports/resolver.js";
@@ -74,6 +75,25 @@ export interface ConductorOptions {
   readonly investigator?: InvestigatorPort;
   readonly claimPlanner?: ClaimPlannerPort;
   readonly claimsKernel?: ClaimsKernelDeps;
+  /**
+   * Optional per-turn Claims-Kernel deps builder (the W5b conductor seam — see
+   * {@link ClaimsKernelDepsForTurn}). Threaded straight onto the Capsule like the
+   * other claims seams; CLAIMS-VALIDATE invokes it (post-INVESTIGATE / pre-kernel)
+   * to rebuild `owns` / `outcomeConfirmed` from THIS turn's owner-scoped ledger
+   * reads + the authenticated `customerId`. Absent → the static `claimsKernel`
+   * deps are used (byte-identical). Wired by the downstream adopter (ibatexas).
+   */
+  readonly claimsKernelDepsForTurn?: ClaimsKernelDepsForTurn;
+  /**
+   * Optional render-from-claims seam (SDD §B / §Q.7). When wired AND the
+   * CLAIMS-VALIDATE stage produced a result, `handleTurn` renders the reply TEXT
+   * deterministically from the validated claims (the "claims-not-prose" thesis),
+   * superseding the model draft's text (artifacts/usage still come from the
+   * draft, and the rendered text still passes the output firewall). Absent → the
+   * legacy model-responder reply (byte-identical). Wired by the downstream
+   * adopter (ibatexas's `renderer-from-claims`), not forced on every conductor.
+   */
+  readonly claimsRenderer?: ClaimsRendererPort;
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
   /**
@@ -312,6 +332,21 @@ export function createConductor(options: ConductorOptions): Conductor {
                 },
               },
             }
+          : {}),
+        // Per-turn Claims-Kernel deps builder (the W5b conductor seam) — optional;
+        // threaded straight through. When present, CLAIMS-VALIDATE invokes it
+        // post-INVESTIGATE / pre-kernel to rebuild `owns` / `outcomeConfirmed`
+        // from THIS turn's owner-scoped ledger reads + the authenticated
+        // customerId (the conductor today rebuilds ONLY `now`). Absent →
+        // byte-identical (the static `claimsKernel` deps stand).
+        ...(options.claimsKernelDepsForTurn !== undefined
+          ? { claimsKernelDepsForTurn: options.claimsKernelDepsForTurn }
+          : {}),
+        // Render-from-claims seam (SDD §B / §Q.7) — optional; threaded straight
+        // through. When present + a claims result exists, handleTurn renders the
+        // reply from claims (the "claims-not-prose" thesis); absent → unchanged.
+        ...(options.claimsRenderer !== undefined
+          ? { claimsRenderer: options.claimsRenderer }
           : {}),
         tools: options.tools,
         channels,

@@ -187,7 +187,7 @@ export async function handleTurn(
   }
 
   // 6. SYNTHESIZE — produce the user-facing reply.
-  const draft = await capsule.responder.respond({
+  let draft = await capsule.responder.respond({
     cognition,
     decision,
     plan,
@@ -196,6 +196,42 @@ export async function handleTurn(
       ? { voice: capsule.tenant.voice }
       : {}),
   });
+
+  // 6a. RENDER-FROM-CLAIMS (optional, SDD §B / §J.6 / §O#3 / §O#15 / §Q.7) — the
+  //     "claims-not-prose" thesis at the loop level. When the CLAIMS-VALIDATE
+  //     stage produced a result AND a `claimsRenderer` is wired, the reply TEXT
+  //     is rendered DETERMINISTICALLY from the validated claims + turn terminal —
+  //     superseding the model draft's text (no model-authored customer prose).
+  //     Artifacts / usage still come from the draft, and the rendered text still
+  //     passes the OUTPUT FIREWALL below (defense in depth). Byte-identical when
+  //     unwired (no claims result, or no renderer) — the legacy reply stands.
+  //     This is NOT a mutation verb (no `adjudicate()` call), so the once-per-turn
+  //     invariant (Hard Rule #3) is preserved.
+  //
+  //     RENDER IS SOLE AUTHOR ON THE RENDERED PATH (Plan 1 Phase 3 / F6). Once the
+  //     pipeline produced a `claims` result and a renderer is wired, the model
+  //     responder draft MUST NOT reach the customer — keeping it would re-admit
+  //     model-authored prose as a confident fact (§O#3). So the rendered text
+  //     supersedes the draft UNCONDITIONALLY; a degenerate-EMPTY render (no
+  //     renderable claim) falls back to a proposition-free SAFE TERMINAL
+  //     (`GENERIC_REFUSAL_TEXT`), NEVER the model draft and NEVER silence. The
+  //     adopter's renderer is expected to emit a non-empty proposition-free safe
+  //     template (UNKNOWN/ESCALATE/CLARIFY) for any non-RENDER / degenerate case;
+  //     this fail-safe is the loop-level backstop if it does not. The request
+  //     surface is threaded so the renderer can run the §O#15 required-claim
+  //     completeness gate (F2).
+  if (claims !== undefined && capsule.claimsRenderer !== undefined) {
+    const renderedFromClaims = capsule.claimsRenderer.render(claims, {
+      requestText: perception.text,
+    });
+    draft = {
+      ...draft,
+      text:
+        renderedFromClaims.text.trim() !== ""
+          ? renderedFromClaims.text
+          : GENERIC_REFUSAL_TEXT,
+    };
+  }
 
   // 6b. OUTPUT FIREWALL (optional, F1) — gate the draft through the kernel when
   //     the adopter wired `adjudicateOutput` AND the tenant flag is on. This is

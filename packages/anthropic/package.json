@@ -22,13 +22,14 @@
     "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@claustrum/core": "workspace:*"
+  },
   "peerDependencies": {
-    "@anthropic-ai/sdk": "^0.82.0",
-    "@claustrum/core": "workspace:^"
+    "@anthropic-ai/sdk": "^0.82.0"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
-    "@claustrum/core": "workspace:*",
     "@claustrum/eslint-config": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0",

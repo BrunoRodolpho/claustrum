@@ -95,13 +95,14 @@ importers:
         version: 5.9.3
 
   packages/anthropic:
+    dependencies:
+      '@claustrum/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.82.0
         version: 0.82.0(zod@4.4.3)
-      '@claustrum/core':
-        specifier: workspace:*
-        version: link:../core
       '@claustrum/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
@@ -116,13 +117,14 @@ importers:
         version: 3.2.6(@types/node@22.19.19)(tsx@4.22.3)
 
   packages/channel-web:
+    dependencies:
+      '@claustrum/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@adjudicate/core':
         specifier: ^1.6.0
         version: 1.6.0
-      '@claustrum/core':
-        specifier: workspace:*
-        version: link:../core
       '@claustrum/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
@@ -138,16 +140,16 @@ importers:
 
   packages/channel-whatsapp:
     dependencies:
+      '@claustrum/core':
+        specifier: workspace:*
+        version: link:../core
       twilio:
         specifier: ^5.3.0
         version: 5.13.1
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.6.0
-        version: 1.6.0
-      '@claustrum/core':
-        specifier: workspace:*
-        version: link:../core
+        specifier: ^1.8.0
+        version: 1.8.0
       '@claustrum/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
@@ -196,13 +198,14 @@ importers:
         version: 3.2.6(@types/node@22.19.19)(tsx@4.22.3)
 
   packages/conformance:
+    dependencies:
+      '@claustrum/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@adjudicate/core':
         specifier: ^1.6.0
         version: 1.6.0
-      '@claustrum/core':
-        specifier: workspace:*
-        version: link:../core
       '@claustrum/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
@@ -219,8 +222,8 @@ importers:
   packages/core:
     devDependencies:
       '@adjudicate/core':
-        specifier: ^1.6.0
-        version: 1.6.0
+        specifier: ^1.8.0
+        version: 1.8.0
       '@adjudicate/runtime':
         specifier: ^0.2.0
         version: 0.2.1
@@ -330,10 +333,11 @@ importers:
         version: 3.2.6(@types/node@22.19.19)(tsx@4.22.3)
 
   packages/openai:
-    devDependencies:
+    dependencies:
       '@claustrum/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
       '@claustrum/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
@@ -363,6 +367,9 @@ packages:
 
   '@adjudicate/core@1.6.0':
     resolution: {integrity: sha512-YeA+sfk0aX1T2r4faCPFQgg+OJF4D3zfqpSJ9hgIy8DgNRY549d08mVP4DvZqV2NUpUidgERWhQmDLWKAAZvSA==}
+
+  '@adjudicate/core@1.8.0':
+    resolution: {integrity: sha512-IyISJr6FD6KN4fGxS2/TjqT4ceZtB1uaPkMFbk8hxeOiHq//XPC7j/dZ4IpGyhLVMhwe1XknRp5mRrZ3wGUfIA==}
 
   '@adjudicate/runtime@0.2.1':
     resolution: {integrity: sha512-/Z2nhfCVSk2VD/0SXBoO1Yl/sIIm5c3wHbblFQd+wE3iVWK0FWn9+I3HvRiTMzwOfeDK+RVA/dlpP0JbzeCwuQ==}
@@ -2831,6 +2838,12 @@ snapshots:
       zod: 4.4.3
 
   '@adjudicate/core@1.6.0':
+    dependencies:
+      '@adjudicate/canonical': 1.2.0
+      '@noble/hashes': 1.8.0
+      zod: 4.4.3
+
+  '@adjudicate/core@1.8.0':
     dependencies:
       '@adjudicate/canonical': 1.2.0
       '@noble/hashes': 1.8.0

@@ -14,7 +14,20 @@
  * direct keeps the adapter testable with a stub `fetch` injection. The
  * `twilio` package is still listed as a dependency so adopters can opt
  * into the typed SDK if they prefer.
+ *
+ * EGRESS BRAND (Plan 1 / Theorem E-1): every customer-facing string leaves
+ * this module only as a {@link RenderedReply} — a runtime-non-forgeable brand
+ * minted by the closed set in `@adjudicate/core`. The raw `fetch` below is the
+ * sole egress chokepoint where {@link unwrapRendered} extracts the string,
+ * after proving provenance. Chunk substrings are re-minted so they stay
+ * branded across the split.
  */
+
+import {
+  type RenderedReply,
+  mintRenderedReply,
+  unwrapRendered,
+} from "@adjudicate/core";
 
 const WHATSAPP_MAX_CHARS = 4096;
 
@@ -23,16 +36,19 @@ export interface SplitOptions {
 }
 
 /**
- * Split `text` into ≤`maxChars` chunks at sentence boundaries (`.`, `!`, `?`,
- * newline). Falls back to a hard slice if a single sentence exceeds the limit.
- * Trims interior whitespace between chunks but preserves intra-chunk content.
+ * Split a {@link RenderedReply} into ≤`maxChars` chunks at sentence boundaries
+ * (`.`, `!`, `?`, newline). Falls back to a hard slice if a single sentence
+ * exceeds the limit. Trims interior whitespace between chunks but preserves
+ * intra-chunk content. Each chunk is re-minted via `mintRenderedReply` so the
+ * brand is preserved on every substring.
  */
 export function splitForWhatsApp(
-  text: string,
+  reply: RenderedReply,
   maxChars: number = WHATSAPP_MAX_CHARS,
-): string[] {
-  if (typeof text !== "string" || text.length === 0) return [];
-  if (text.length <= maxChars) return [text];
+): RenderedReply[] {
+  const text = unwrapRendered(reply);
+  if (text.length === 0) return [];
+  if (text.length <= maxChars) return [mintRenderedReply(text)];
 
   const chunks: string[] = [];
   let remaining = text;
@@ -64,7 +80,7 @@ export function splitForWhatsApp(
     remaining = remaining.slice(breakAt);
   }
   if (remaining.length > 0) chunks.push(remaining.trim());
-  return chunks.filter((c) => c.length > 0);
+  return chunks.filter((c) => c.length > 0).map(mintRenderedReply);
 }
 
 export interface SendTwilioMessageInput {
@@ -72,7 +88,7 @@ export interface SendTwilioMessageInput {
   readonly authToken: string;
   readonly from: string;
   readonly to: string;
-  readonly body: string;
+  readonly body: RenderedReply;
   readonly fetch?: typeof globalThis.fetch;
   /** Override sleep in tests. Production uses `setTimeout`. */
   readonly sleep?: (ms: number) => Promise<void>;
@@ -106,7 +122,13 @@ export async function sendTwilioMessage(
 
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
   const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-  const form = new URLSearchParams({ From: from, To: to, Body: body });
+  // SOLE egress chokepoint: unwrap the brand once, proving provenance, at the
+  // exact point the string crosses the wire to Twilio.
+  const form = new URLSearchParams({
+    From: from,
+    To: to,
+    Body: unwrapRendered(body),
+  });
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const res = await fetch(url, {

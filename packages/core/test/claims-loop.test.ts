@@ -44,9 +44,11 @@ import {
   createConductor,
   createToolRegistry,
   handleTurn,
+  runClaimsValidate,
   type CapabilityId,
   type ChannelMessage,
   type ClaimPlannerPort,
+  type ClaimsRendererPort,
   type IntentKind,
   type InvestigatorPort,
   type Plan,
@@ -80,7 +82,7 @@ function stageEntry(key: string): EvidenceEntryInput {
     fetchedAt: NOW_MS,
     sourceMode: "live",
     taint: "TRUSTED",
-    originProvenance: "TRUSTED",
+    originProvenance: "FIRST_PARTY",
   };
 }
 
@@ -101,6 +103,20 @@ function soundCandidate(key: string, type: string): CandidateClaim {
       kind: "read_claim",
       actor: { customerId: CUSTOMER },
       resources: { [key]: ORDER },
+      // W6 falsifier-completeness eligibility (≥ @adjudicate/core 1.8.0): a claim
+      // VALIDATEs only if its type ENUMERATED how it could be falsified. The
+      // falsifier key is never recorded into the ledger → the runtime arm never
+      // fires → the claim still reaches VALIDATED (the property under test).
+      falsifierComplete: true,
+      falsifiers: [
+        {
+          key: `${key}:falsifier`,
+          ownershipPolicy: "required",
+          freshnessPolicy: "must_read_this_turn",
+          sourceIntegrity: "trusted_service",
+          provenancePolicy: "preserve",
+        },
+      ],
     },
     subject: ORDER,
     type,
@@ -128,6 +144,67 @@ function unsoundCandidate(key: string, type: string): CandidateClaim {
     subject: ORDER,
     type,
     value: "guessed",
+  };
+}
+
+/**
+ * A present, FIRST_PARTY, CACHEABLE evidence entry (e.g. STORE_OPEN_NOW's
+ * schedule read) with a CALLER-SET `fetchedAt`. `sourceMode: "cache"` is the
+ * faithful stamp for a cacheable read — the regression is precisely that this is
+ * NOT `"live"`, so the old live-only floor never raised `now` for it.
+ */
+function cacheableEntry(key: string, fetchedAt: number): EvidenceEntryInput {
+  return {
+    key,
+    value: "open",
+    source: "ScheduleProjection",
+    fetchedAt,
+    sourceMode: "cache",
+    taint: "TRUSTED",
+    originProvenance: "FIRST_PARTY",
+  };
+}
+
+/**
+ * A candidate requiring a single CACHEABLE(ttl) first-party read. It VALIDATEs
+ * iff the kernel's cacheable freshness check passes (`0 <= now - fetchedAt <=
+ * ttl`); freshness is the ONLY differentiating conjunct (ownership injected
+ * true, integrity met, provenance preserved, falsifier-complete).
+ */
+function cacheableCandidate(
+  key: string,
+  type: string,
+  ttl: number,
+): CandidateClaim {
+  return {
+    soundness: {
+      requiredEvidence: [
+        {
+          key,
+          ownershipPolicy: "required",
+          freshnessPolicy: { kind: "cacheable", ttl },
+          sourceIntegrity: "trusted_service",
+          provenancePolicy: "preserve",
+        },
+      ],
+      minSourceIntegrity: "trusted_service",
+      kind: "read_claim",
+      actor: { customerId: CUSTOMER },
+      resources: { [key]: ORDER },
+      falsifierComplete: true,
+      falsifiers: [
+        {
+          key: `${key}:falsifier`,
+          ownershipPolicy: "required",
+          freshnessPolicy: { kind: "cacheable", ttl },
+          sourceIntegrity: "trusted_service",
+          provenancePolicy: "preserve",
+        },
+      ],
+    },
+    subject: ORDER,
+    type,
+    value: "open",
   };
 }
 
@@ -218,6 +295,7 @@ interface BundleOpts {
   readonly investigator?: InvestigatorPort;
   readonly claimPlanner?: ClaimPlannerPort;
   readonly withKernelDeps?: boolean;
+  readonly claimsRenderer?: ClaimsRendererPort;
 }
 
 function makeBundle(opts: BundleOpts) {
@@ -243,6 +321,7 @@ function makeBundle(opts: BundleOpts) {
     ...(opts.investigator !== undefined ? { investigator: opts.investigator } : {}),
     ...(opts.claimPlanner !== undefined ? { claimPlanner: opts.claimPlanner } : {}),
     ...(opts.withKernelDeps !== false ? { claimsKernel } : {}),
+    ...(opts.claimsRenderer !== undefined ? { claimsRenderer: opts.claimsRenderer } : {}),
   });
   return { adjudicator, session, channel, executed, conductor };
 }
@@ -485,5 +564,228 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
 
     expect(investigator.investigateCalls).toBe(1);
     expect(result.claims).toBeUndefined();
+  });
+
+  it("RENDER-FROM-CLAIMS: a wired claimsRenderer SUPERSEDES the model draft's text (claims-not-prose)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    // A deterministic renderer that echoes the kernel terminal — proves the reply
+    // came FROM the claims result, not the model responder ("ok: …").
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims) => ({ text: `RENDERED[${claims.terminal}]` }),
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    // The reply is the deterministic claims render, NOT the model draft "ok: …".
+    expect(result.response.text).toBe(`RENDERED[${result.claims?.terminal ?? ""}]`);
+    expect(result.response.text.startsWith("ok:")).toBe(false);
+  });
+
+  it("RENDER-FROM-CLAIMS empty-render SAFE-TERMINAL: a degenerate EMPTY render falls back to a proposition-free safe terminal, NOT the model draft (F6)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    // A renderer that produces NO renderable text (e.g. a degenerate empty
+    // RENDER set). RENDER IS SOLE AUTHOR ON THE RENDERED PATH (F6): the loop must
+    // NOT re-admit the model responder draft — it falls back to a proposition-free
+    // SAFE TERMINAL (GENERIC_REFUSAL_TEXT), never the model prose, never silence.
+    const claimsRenderer: ClaimsRendererPort = {
+      render: () => ({ text: "   " }),
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    // Never empty, and NEVER the model draft ("ok: …") — the safe terminal stands.
+    expect(result.response.text.trim()).not.toBe("");
+    expect(result.response.text.startsWith("ok:")).toBe(false);
+  });
+
+  it("RENDER-FROM-CLAIMS receives the request context (F2 §O#15 completeness gate)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let seenRequestText: string | undefined = "UNSET";
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        seenRequestText = context?.requestText;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    await runTurn(conductor);
+
+    // The loop threads the inbound request surface into the renderer so it can
+    // run the §O#15 required-claim completeness gate over THIS request.
+    expect(seenRequestText).toBe("por que meu pedido está atrasado?");
+  });
+
+  it("RENDER-FROM-CLAIMS non-vacuity: WITHOUT a claimsRenderer the model draft text stands (byte-identical)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    // Same pipeline, NO renderer wired → the legacy model-responder reply stands.
+    const { conductor } = makeBundle({ investigator, claimPlanner });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    expect(result.response.text.startsWith("ok:")).toBe(true);
+  });
+
+  it("F2 safe-degrade: a claim-planner that THROWS (e.g. Ollama tool-call XML parse error) → no claims, turn proceeds safe (never throws out of the turn)", async () => {
+    // The claim planner is the one probabilistic step in CLAIMS-VALIDATE. A live
+    // 4B model raised an Ollama tool-call XML parse error ("element <parameter>…")
+    // on ~1/3 of turns; `propose` rejects. The stage must DEGRADE SAFE: catch the
+    // failure, emit no claims, and let the turn fall through to the legacy
+    // responder/safe path — NOT throw out of the turn, NOT fabricate a claim.
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    let proposeCalls = 0;
+    const throwingClaimPlanner: ClaimPlannerPort = {
+      async propose(): Promise<ReadonlyArray<CandidateClaim>> {
+        proposeCalls += 1;
+        throw new Error(
+          'invalid tool call: unexpected XML element <parameter> in completion',
+        );
+      },
+    };
+    // A renderer is wired too — to prove that even with the claims-render path
+    // available, a degraded (undefined) claims result leaves the model draft to
+    // stand rather than rendering from a fabricated/empty claim set.
+    const claimsRenderer: ClaimsRendererPort = {
+      render() {
+        throw new Error("renderer must NOT run when claims degraded to undefined");
+      },
+    };
+    const { conductor } = makeBundle({
+      investigator,
+      claimPlanner: throwingClaimPlanner,
+      claimsRenderer,
+    });
+
+    // The turn must RESOLVE (not reject): the planner error degrades safe.
+    const result = await runTurn(conductor);
+
+    expect(proposeCalls).toBe(1); // the failing model call was actually attempted
+    // No claims result was produced — byte-equivalent to an unwired pipeline.
+    expect(result.claims).toBeUndefined();
+    // The turn proceeded on the legacy responder/safe path — no fabrication.
+    expect(result.response.text.startsWith("ok:")).toBe(true);
+  });
+
+  it("F2 unit: runClaimsValidate returns undefined when claimPlanner.propose throws (degrade safe, no rethrow)", async () => {
+    // Direct unit over the stage seam: a throwing planner must yield `undefined`
+    // (the safe fall-through signal), never a rejected promise and never a claim.
+    const ledger = new EvidenceLedger("turn-f2-unit");
+    ledger.record(stageEntry("stage:order-1"));
+    const capsule = {
+      customerId: CUSTOMER,
+      claimsKernel,
+      claimPlanner: {
+        async propose(): Promise<ReadonlyArray<CandidateClaim>> {
+          throw new Error('element <parameter> parse error');
+        },
+      },
+    } as unknown as Parameters<typeof runClaimsValidate>[0];
+    const cognition = {
+      turnId: "turn-f2-unit",
+      perception: { text: "por que meu pedido está atrasado?" },
+    } as unknown as Parameters<typeof runClaimsValidate>[1];
+    const plan = { envelopes: [], rationale: "x" } as unknown as Parameters<
+      typeof runClaimsValidate
+    >[2];
+
+    await expect(
+      runClaimsValidate(capsule, cognition, plan, ledger),
+    ).resolves.toBeUndefined();
+  });
+
+  it("FRESHNESS FLOOR (a): a SAME-TURN cacheable first-party read (fetchedAt slightly AFTER frozen now) is floored → VALIDATES (the STORE_OPEN_NOW regression fix)", async () => {
+    // THE REGRESSION: the Conductor freezes `now` at openCapsule (turn START);
+    // the investigator then stamps a CACHEABLE first-party read (STORE_OPEN_NOW's
+    // schedule, freshnessPolicy {cacheable, ttl}) with `fetchedAt = Date.now()` a
+    // few ms LATER → `fetchedAt > now`. The OLD live-only floor never raised `now`
+    // for a `sourceMode: "cache"` entry, so the kernel's cacheable check saw
+    // `age = now - fetchedAt < 0` → UNKNOWN. The generalized floor raises `now` to
+    // the newest SAME-TURN first-party `fetchedAt` (live OR cacheable) → age 0 →
+    // PASS → VALIDATED.
+    //
+    // NON-VACUITY: revert claims-validate.ts step (1) to `sourceMode === "live"`
+    // only and this entry (sourceMode "cache", fetchedAt > now) stops raising the
+    // floor → age < 0 → terminal UNKNOWN → these assertions go RED.
+    const ledger = new EvidenceLedger("turn-floor-a");
+    ledger.record(cacheableEntry("schedule:store", NOW_MS + 5));
+    const capsule = {
+      customerId: CUSTOMER,
+      claimsKernel, // now = NOW_MS, frozen at turn start (BEFORE the read stamp)
+      claimPlanner: fixedClaimPlanner([
+        cacheableCandidate("schedule:store", "STORE_OPEN_NOW", 3600),
+      ]),
+    } as unknown as Parameters<typeof runClaimsValidate>[0];
+    const cognition = {
+      turnId: "turn-floor-a",
+      perception: { text: "vocês estão abertos agora?" },
+    } as unknown as Parameters<typeof runClaimsValidate>[1];
+    const plan = { envelopes: [], rationale: "x" } as unknown as Parameters<
+      typeof runClaimsValidate
+    >[2];
+
+    const result = await runClaimsValidate(capsule, cognition, plan, ledger);
+
+    expect(result).toBeDefined();
+    expect(result!.perClaim).toEqual([
+      { subject: ORDER, type: "STORE_OPEN_NOW", verdict: "VALIDATED" },
+    ]);
+    expect(result!.terminal).toBe("RENDER");
+  });
+
+  it("FRESHNESS FLOOR (b): a genuinely-STALE cached entry (fetchedAt ≪ now, age > ttl) is NOT rescued by the floor → demotes to UNKNOWN (no masking)", async () => {
+    // HARD GUARD: the floor must NEVER mask a stale cache. The predicate is
+    // `fetchedAt > frozenNow`, so an OLD cache (`fetchedAt ≪ now`) is EXCLUDED → it
+    // cannot raise `now` → its age stays large → the kernel cacheable check
+    // (`age > ttl`) demotes it to UNKNOWN exactly as before. The floor only ever
+    // absorbs the few-ms same-turn clock skew; it never reaches back to revive a
+    // genuinely stale entry.
+    //
+    // NON-VACUITY: if the floor were (incorrectly) broadened to raise `now` over
+    // ALL present entries regardless of `fetchedAt > now`, this stale entry's
+    // `fetchedAt` could pull `now` down (Math.max wouldn't, but a min/avg bug
+    // would) — this test pins that the stale entry stays UNKNOWN.
+    const TTL = 3600;
+    const ledger = new EvidenceLedger("turn-floor-b");
+    // Fetched 2h ago → age 7200s ≫ ttl, and fetchedAt ≪ frozen now.
+    ledger.record(cacheableEntry("schedule:store", NOW_MS - 7200 * 1000));
+    const capsule = {
+      customerId: CUSTOMER,
+      claimsKernel, // now = NOW_MS
+      claimPlanner: fixedClaimPlanner([
+        cacheableCandidate("schedule:store", "STORE_OPEN_NOW", TTL),
+      ]),
+    } as unknown as Parameters<typeof runClaimsValidate>[0];
+    const cognition = {
+      turnId: "turn-floor-b",
+      perception: { text: "vocês estão abertos agora?" },
+    } as unknown as Parameters<typeof runClaimsValidate>[1];
+    const plan = { envelopes: [], rationale: "x" } as unknown as Parameters<
+      typeof runClaimsValidate
+    >[2];
+
+    const result = await runClaimsValidate(capsule, cognition, plan, ledger);
+
+    expect(result).toBeDefined();
+    expect(result!.perClaim).toEqual([
+      { subject: ORDER, type: "STORE_OPEN_NOW", verdict: "UNKNOWN" },
+    ]);
+    expect(result!.terminal).not.toBe("RENDER");
   });
 });

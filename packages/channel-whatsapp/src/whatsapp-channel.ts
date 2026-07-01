@@ -26,6 +26,7 @@ import type {
 } from "@claustrum/core";
 import { isRecipientArtifact, resolveGatewaySigningKey } from "@claustrum/core";
 import type { IntentEnvelope } from "@adjudicate/core";
+import { wrapLegacyResponderText } from "@adjudicate/core";
 import { attestWithGatewayKey } from "./attest.js";
 import { matchToParkedByReply } from "./parked-match.js";
 import { perceiveTwilioWebhook } from "./perceive.js";
@@ -107,7 +108,13 @@ export class WhatsAppChannel implements ChannelDriver {
   }
 
   async render(response: RenderedResponse): Promise<void> {
-    const chunks = splitForWhatsApp(response.text);
+    // E-1 transitional bridge: `RenderedResponse.text` is still a plain string
+    // this wave (the upstream string->RenderedReply flip is W5/W6). Wrap it once
+    // via the deprecated legacy-responder minter so the egress type-checks and
+    // every chunk leaves as a branded RenderedReply. This wrap is the W5
+    // deletion seam — when RenderedResponse.text becomes RenderedReply upstream,
+    // the channel receives an already-minted value and this call is removed.
+    const chunks = splitForWhatsApp(wrapLegacyResponderText(response.text));
     if (chunks.length === 0) return;
 
     // The customerId on RenderedResponse is the hashed phone — we cannot

@@ -22,12 +22,13 @@
     "lint": "tsc --noEmit && eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@claustrum/core": "workspace:*"
+  },
   "peerDependencies": {
-    "@claustrum/core": "workspace:^",
     "openai": "^4.77.0"
   },
   "devDependencies": {
-    "@claustrum/core": "workspace:*",
     "@claustrum/eslint-config": "workspace:*",
     "@types/node": "^22.0.0",
     "openai": "^4.77.0",
