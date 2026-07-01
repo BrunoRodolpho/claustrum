@@ -1,5 +1,78 @@
 # @claustrum/core
 
+## 0.4.0
+
+### Minor Changes
+
+- a005e6f: Render-from-claims seam (Plan 1 Phase 3 / SDD §B · §J.6 · §O#3 · §Q.7): the
+  cognitive loop can now render the customer-facing reply DETERMINISTICALLY from the
+  validated claims — the "claims-not-prose" thesis at the loop level.
+  - New optional port `ClaimsRendererPort` (`render(claims: ClaimsKernelResult) →
+{ text }`) + `ClaimsRenderResult`, exported from the barrel. The deterministic
+    template-filler itself lives DOWNSTREAM (ibatexas `renderer-from-claims`); this
+    is the seam contract only.
+  - New optional `Capsule.claimsRenderer` + `ConductorOptions.claimsRenderer`,
+    threaded straight through `createConductor` (like the other claims seams).
+  - `handleTurn` new stage 6a (RENDER-FROM-CLAIMS): when CLAIMS-VALIDATE produced a
+    `ClaimsKernelResult` AND `claimsRenderer` is wired, the reply TEXT is rendered
+    from the claims, SUPERSEDING the model draft's text (artifacts/usage still come
+    from the draft; the rendered text still passes the OUTPUT FIREWALL). Not a
+    mutation verb — no `adjudicate()` call, so the once-per-turn invariant holds.
+
+  ADDITIVE + BYTE-IDENTICAL when unwired: with no `claimsRenderer` (or no claims
+  result), the legacy model-responder reply stands unchanged. The frozen ports are
+  extended, never broken.
+
+- 49f9530: Track-A / W6 — the per-turn CLAIMS-VALIDATE reconciliation seam (SDD §F / §G/§E;
+  the W5b conductor seam). Closes the two loop-side defects that demoted valid
+  owner-scoped first-party claims to UNKNOWN under the published Claims Kernel,
+  WITHOUT touching the kernel (the kernel guards are correct and stay).
+  - New `ConductorOptions.claimsKernelDepsForTurn?` + `Capsule.claimsKernelDepsForTurn?`
+    (type `ClaimsKernelDepsForTurn`, exported from the barrel): an optional per-turn
+    builder that rebuilds the Claims-Kernel deps (`owns` / `outcomeConfirmed`) from
+    THIS turn's threaded read-only Evidence Ledger + the AUTHENTICATED `customerId`.
+    The conductor previously rebuilt ONLY `now` per turn (R2a), so the process-wide
+    boot-empty owner set left every owner-scoped ORDER/PAYMENT claim REFUSED even
+    for its legit owner. Threaded straight through `createConductor` like the other
+    claims seams. IDOR stays closed: the adopter derives the owned set ONLY from
+    owner-scoped reads that returned PRESENT — never a session/model id.
+  - `CLAIMS-VALIDATE` now runs a PER-TURN RECONCILIATION between the planner and the
+    pure kernel (post-INVESTIGATE / pre-`runClaimsKernel`), adjusting only kernel
+    INPUTS (never a verdict, never a skipped conjunct — the full §5 predicate still
+    runs):
+    1. **Freshness floor (clock-ordering fix).** The conductor captures the per-turn
+       `now` at openCapsule (turn START) BEFORE the investigator stamps each read's
+       `fetchedAt = Date.now()`; a same-turn first-party read could thus carry
+       `fetchedAt > now` → the kernel's correct negative-age guard rejected it → a
+       valid this-turn read demoted to UNKNOWN. CLAIMS-VALIDATE now FLOORS `now` up
+       to the newest SAME-TURN first-party read's `fetchedAt`.
+
+       GENERALIZED (this revision) from `sourceMode === "live"` ONLY to ALL PRESENT
+       first-party (`originProvenance === "FIRST_PARTY"`) entries whose `fetchedAt`
+       is AFTER the frozen turn-start `now` (= reads taken THIS turn), regardless of
+       live-vs-cacheable. The live-only floor regressed STORE_OPEN_NOW: its schedule
+       evidence is `sourceMode: "cache"` (freshnessPolicy `{cacheable, ttl:3600}`),
+       stamped `fetchedAt ≈ now + ε` AFTER the conductor froze `now`, so the floor
+       never raised `now` → the kernel cacheable check (`age = now - fetchedAt; age
+
+       > = 0 && age <= ttl`) saw `age < 0`→ UNKNOWN. The predicate is`fetchedAt >
+       > frozenNow`, so a genuinely-STALE cached entry (`fetchedAt ≪ now`) is EXCLUDED
+→ it can NEVER raise the floor → it still demotes to UNKNOWN (no masking,
+unit-tested). The floor only RAISES `now`to absorb same-turn clock skew; the
+kernel negative-age guard is NOT relaxed (it stays in adjudicate).`must_read_this_turn` (clock-independent) is unaffected.
+
+    2. **Per-turn owns** — invokes `claimsKernelDepsForTurn` (above) when wired.
+    3. **Ledger-exact value derivation** — binds a still-undefined bound candidate's
+       `value` to its PRESENT first-party ledger entry so C6 compares ledger-sourced
+       scalars (the model authors NO value — it emits the type tag only). A
+       cross-owner / absent read stays undefined → C6 ABSTAINs → honest UNKNOWN.
+
+  ADDITIVE + BYTE-IDENTICAL when unwired: with no `claimsKernelDepsForTurn` and no
+  same-turn live reads to floor, the stage is unchanged. Requires `@adjudicate/core`
+
+  > = 1.8.0 (the C6 `valueBinding` surface this reconciliation reads). This minor
+  > changeset bumps `@claustrum/core` 0.3.x -> 0.4.0 (the real publish target).
+
 ## 0.3.2
 
 ### Patch Changes
