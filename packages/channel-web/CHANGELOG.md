@@ -1,5 +1,12 @@
 # @claustrum/channel-web
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [4815c5f]
+  - @claustrum/core@0.5.0
+
 ## 0.1.3
 
 ### Patch Changes

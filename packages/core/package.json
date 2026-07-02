@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Governance-native conversational runtime spine — Conductor, Capsule, handleTurn, 13 ports. Built on @adjudicate/core.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@claustrum/channel-web",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Web/HTTP ChannelDriver adapter for @claustrum/core. Pluggable render sink (WebSocket/SSE) and HMAC-SHA256 envelope attestation.",
   "license": "MIT",
   "type": "module",
