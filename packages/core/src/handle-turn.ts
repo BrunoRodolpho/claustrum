@@ -221,8 +221,20 @@ export async function handleTurn(
   //     surface is threaded so the renderer can run the §O#15 required-claim
   //     completeness gate (F2).
   if (claims !== undefined && capsule.claimsRenderer !== undefined) {
+    // #8 decomposer ownership signal — derived ONLY from this turn's threaded
+    // ledger + the AUTHENTICATED customerId (never session/model ids), so the
+    // adopter's required-claim decomposer can demand ownership companions for
+    // the resources actually active this turn. Unwired / no ledger → absent.
+    const activeResources =
+      capsule.activeResourcesForTurn !== undefined && ledger !== undefined
+        ? capsule.activeResourcesForTurn({
+            ledger,
+            customerId: capsule.customerId,
+          })
+        : undefined;
     const renderedFromClaims = capsule.claimsRenderer.render(claims, {
       requestText: perception.text,
+      ...(activeResources !== undefined ? { activeResources } : {}),
     });
     draft = {
       ...draft,

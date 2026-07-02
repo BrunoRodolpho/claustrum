@@ -45,6 +45,8 @@ import {
   createToolRegistry,
   handleTurn,
   runClaimsValidate,
+  type ActiveResourceRef,
+  type ActiveResourcesForTurn,
   type CapabilityId,
   type ChannelMessage,
   type ClaimPlannerPort,
@@ -296,6 +298,7 @@ interface BundleOpts {
   readonly claimPlanner?: ClaimPlannerPort;
   readonly withKernelDeps?: boolean;
   readonly claimsRenderer?: ClaimsRendererPort;
+  readonly activeResourcesForTurn?: ActiveResourcesForTurn;
 }
 
 function makeBundle(opts: BundleOpts) {
@@ -322,6 +325,9 @@ function makeBundle(opts: BundleOpts) {
     ...(opts.claimPlanner !== undefined ? { claimPlanner: opts.claimPlanner } : {}),
     ...(opts.withKernelDeps !== false ? { claimsKernel } : {}),
     ...(opts.claimsRenderer !== undefined ? { claimsRenderer: opts.claimsRenderer } : {}),
+    ...(opts.activeResourcesForTurn !== undefined
+      ? { activeResourcesForTurn: opts.activeResourcesForTurn }
+      : {}),
   });
   return { adjudicator, session, channel, executed, conductor };
 }
@@ -627,6 +633,62 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     // The loop threads the inbound request surface into the renderer so it can
     // run the §O#15 required-claim completeness gate over THIS request.
     expect(seenRequestText).toBe("por que meu pedido está atrasado?");
+  });
+
+  it("RENDER-FROM-CLAIMS #8 ownership signal: a wired activeResourcesForTurn derives from (ledger, AUTHENTICATED customerId) and reaches the renderer as context.activeResources", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let derivedForCustomer: string | undefined;
+    let ledgerWasThreaded = false;
+    const activeResourcesForTurn: ActiveResourcesForTurn = ({ ledger, customerId }) => {
+      derivedForCustomer = customerId;
+      ledgerWasThreaded = ledger instanceof EvidenceLedger;
+      return [{ kind: "order", id: "order-1" }];
+    };
+    let seenActiveResources: readonly ActiveResourceRef[] | undefined;
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        seenActiveResources = context?.activeResources;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({
+      investigator,
+      claimPlanner,
+      claimsRenderer,
+      activeResourcesForTurn,
+    });
+
+    await runTurn(conductor);
+
+    // Derived ONLY from the threaded ledger + the conductor's authenticated
+    // customer — never a session/model-supplied id.
+    expect(derivedForCustomer).toBe(CUSTOMER);
+    expect(ledgerWasThreaded).toBe(true);
+    expect(seenActiveResources).toEqual([{ kind: "order", id: "order-1" }]);
+  });
+
+  it("RENDER-FROM-CLAIMS #8 ownership signal non-vacuity: WITHOUT the seam the render context carries NO activeResources (byte-identical)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let seenActiveResources: readonly ActiveResourceRef[] | undefined = [
+      { kind: "sentinel", id: "UNSET" },
+    ];
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        seenActiveResources = context?.activeResources;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    await runTurn(conductor);
+
+    expect(seenActiveResources).toBeUndefined();
   });
 
   it("RENDER-FROM-CLAIMS non-vacuity: WITHOUT a claimsRenderer the model draft text stands (byte-identical)", async () => {

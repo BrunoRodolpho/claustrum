@@ -19,7 +19,12 @@ import type {
   Decision,
   IntentEnvelope,
 } from "@adjudicate/core";
-import type { Capsule, ChannelMap, ClaimsKernelDepsForTurn } from "./capsule.js";
+import type {
+  ActiveResourcesForTurn,
+  Capsule,
+  ChannelMap,
+  ClaimsKernelDepsForTurn,
+} from "./capsule.js";
 import type {
   Adjudicator,
   ConfirmationReceipt,
@@ -94,6 +99,15 @@ export interface ConductorOptions {
    * adopter (ibatexas's `renderer-from-claims`), not forced on every conductor.
    */
   readonly claimsRenderer?: ClaimsRendererPort;
+  /**
+   * Optional per-turn active-resources deriver (the #8 decomposer
+   * ownership-signal seam — see {@link ActiveResourcesForTurn}). Threaded
+   * straight onto the Capsule; RENDER-FROM-CLAIMS invokes it over THIS turn's
+   * ledger + the authenticated `customerId` and threads the result as
+   * `ClaimsRenderContext.activeResources`. Absent → byte-identical (no signal).
+   * Wired by the downstream adopter (ibatexas).
+   */
+  readonly activeResourcesForTurn?: ActiveResourcesForTurn;
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
   /**
@@ -347,6 +361,12 @@ export function createConductor(options: ConductorOptions): Conductor {
         // reply from claims (the "claims-not-prose" thesis); absent → unchanged.
         ...(options.claimsRenderer !== undefined
           ? { claimsRenderer: options.claimsRenderer }
+          : {}),
+        // #8 decomposer ownership signal — optional; threaded straight through.
+        // RENDER-FROM-CLAIMS derives activeResources from the turn's ledger +
+        // the authenticated customerId. Absent → no signal (byte-identical).
+        ...(options.activeResourcesForTurn !== undefined
+          ? { activeResourcesForTurn: options.activeResourcesForTurn }
           : {}),
         tools: options.tools,
         channels,

@@ -17,6 +17,7 @@ export {
   type OpenCapsuleInput,
 } from "./conductor.js";
 export type {
+  ActiveResourcesForTurn,
   Capsule,
   ChannelMap,
   ClaimsKernelDepsForTurn,
@@ -108,6 +109,7 @@ export {
   runClaimsValidate,
 } from "./claims-loop/index.js";
 export type {
+  ActiveResourceRef,
   ClaimsRenderContext,
   ClaimsRendererPort,
   ClaimsRenderResult,
