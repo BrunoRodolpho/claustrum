@@ -1,5 +1,19 @@
 # @claustrum/core
 
+## 0.5.0
+
+### Minor Changes
+
+- 4815c5f: Thread the #8 decomposer ownership signal to the claims renderer: new optional
+  `ActiveResourcesForTurn` seam on the Capsule/Conductor (mirroring
+  `ClaimsKernelDepsForTurn`) derives the turn's active owner-scoped resources from
+  the threaded Evidence Ledger + the AUTHENTICATED customerId — never
+  session/model ids — and `handleTurn` passes the result to the renderer as the
+  new `ClaimsRenderContext.activeResources` (`ActiveResourceRef[]`). All additive
+  and optional: unwired conductors/renderers are byte-identical. This is the
+  pre-flag-flip gate for the adopter-side §O#15 required-claim decomposer's
+  ownership companions (BKL-004).
+
 ## 0.4.0
 
 ### Minor Changes
@@ -39,33 +53,33 @@
   - `CLAIMS-VALIDATE` now runs a PER-TURN RECONCILIATION between the planner and the
     pure kernel (post-INVESTIGATE / pre-`runClaimsKernel`), adjusting only kernel
     INPUTS (never a verdict, never a skipped conjunct — the full §5 predicate still
-    runs):
-    1. **Freshness floor (clock-ordering fix).** The conductor captures the per-turn
-       `now` at openCapsule (turn START) BEFORE the investigator stamps each read's
-       `fetchedAt = Date.now()`; a same-turn first-party read could thus carry
-       `fetchedAt > now` → the kernel's correct negative-age guard rejected it → a
-       valid this-turn read demoted to UNKNOWN. CLAIMS-VALIDATE now FLOORS `now` up
-       to the newest SAME-TURN first-party read's `fetchedAt`.
+    runs): 1. **Freshness floor (clock-ordering fix).** The conductor captures the per-turn
+    `now` at openCapsule (turn START) BEFORE the investigator stamps each read's
+    `fetchedAt = Date.now()`; a same-turn first-party read could thus carry
+    `fetchedAt > now` → the kernel's correct negative-age guard rejected it → a
+    valid this-turn read demoted to UNKNOWN. CLAIMS-VALIDATE now FLOORS `now` up
+    to the newest SAME-TURN first-party read's `fetchedAt`.
 
-       GENERALIZED (this revision) from `sourceMode === "live"` ONLY to ALL PRESENT
-       first-party (`originProvenance === "FIRST_PARTY"`) entries whose `fetchedAt`
-       is AFTER the frozen turn-start `now` (= reads taken THIS turn), regardless of
-       live-vs-cacheable. The live-only floor regressed STORE_OPEN_NOW: its schedule
-       evidence is `sourceMode: "cache"` (freshnessPolicy `{cacheable, ttl:3600}`),
-       stamped `fetchedAt ≈ now + ε` AFTER the conductor froze `now`, so the floor
-       never raised `now` → the kernel cacheable check (`age = now - fetchedAt; age
+           GENERALIZED (this revision) from `sourceMode === "live"` ONLY to ALL PRESENT
+           first-party (`originProvenance === "FIRST_PARTY"`) entries whose `fetchedAt`
+           is AFTER the frozen turn-start `now` (= reads taken THIS turn), regardless of
+           live-vs-cacheable. The live-only floor regressed STORE_OPEN_NOW: its schedule
+           evidence is `sourceMode: "cache"` (freshnessPolicy `{cacheable, ttl:3600}`),
+           stamped `fetchedAt ≈ now + ε` AFTER the conductor froze `now`, so the floor
+           never raised `now` → the kernel cacheable check (`age = now - fetchedAt; age
 
-       > = 0 && age <= ttl`) saw `age < 0`→ UNKNOWN. The predicate is`fetchedAt >
-       > frozenNow`, so a genuinely-STALE cached entry (`fetchedAt ≪ now`) is EXCLUDED
-→ it can NEVER raise the floor → it still demotes to UNKNOWN (no masking,
-unit-tested). The floor only RAISES `now`to absorb same-turn clock skew; the
-kernel negative-age guard is NOT relaxed (it stays in adjudicate).`must_read_this_turn` (clock-independent) is unaffected.
+           > = 0 && age <= ttl`) saw `age < 0`→ UNKNOWN. The predicate is`fetchedAt >
+           > frozenNow`, so a genuinely-STALE cached entry (`fetchedAt ≪ now`) is EXCLUDED
 
-    2. **Per-turn owns** — invokes `claimsKernelDepsForTurn` (above) when wired.
-    3. **Ledger-exact value derivation** — binds a still-undefined bound candidate's
-       `value` to its PRESENT first-party ledger entry so C6 compares ledger-sourced
-       scalars (the model authors NO value — it emits the type tag only). A
-       cross-owner / absent read stays undefined → C6 ABSTAINs → honest UNKNOWN.
+    → it can NEVER raise the floor → it still demotes to UNKNOWN (no masking,
+    unit-tested). The floor only RAISES `now`to absorb same-turn clock skew; the
+    kernel negative-age guard is NOT relaxed (it stays in adjudicate).`must_read_this_turn` (clock-independent) is unaffected.
+
+        2. **Per-turn owns** — invokes `claimsKernelDepsForTurn` (above) when wired.
+        3. **Ledger-exact value derivation** — binds a still-undefined bound candidate's
+           `value` to its PRESENT first-party ledger entry so C6 compares ledger-sourced
+           scalars (the model authors NO value — it emits the type tag only). A
+           cross-owner / absent read stays undefined → C6 ABSTAINs → honest UNKNOWN.
 
   ADDITIVE + BYTE-IDENTICAL when unwired: with no `claimsKernelDepsForTurn` and no
   same-turn live reads to floor, the stage is unchanged. Requires `@adjudicate/core`
