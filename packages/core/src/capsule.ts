@@ -29,7 +29,10 @@ import type {
 } from "./ports/adjudicator.js";
 import type { ChannelDriver, ChannelKind } from "./ports/channel.js";
 import type { ClaimPlannerPort } from "./ports/claim-planner.js";
-import type { ClaimsRendererPort } from "./ports/claims-renderer.js";
+import type {
+  ActiveResourceRef,
+  ClaimsRendererPort,
+} from "./ports/claims-renderer.js";
 import type { ExplainerPort } from "./ports/explainer.js";
 import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
@@ -82,6 +85,28 @@ export type ClaimsKernelDepsForTurn = (args: {
   /** The process-wide deps with the per-turn `now` already floored. */
   readonly base: ClaimsKernelDeps;
 }) => ClaimsKernelDeps;
+
+/**
+ * Per-turn active-resources deriver (the #8 decomposer ownership-signal seam).
+ *
+ * The §O#15 required-claim decomposer (adopter-side, inside the claims
+ * renderer) needs to know WHICH owner-scoped resources are active THIS turn
+ * (e.g. the customer's in-flight order / pending payment) to demand ownership
+ * companions for them. Like {@link ClaimsKernelDepsForTurn}, the signal must
+ * derive ONLY from the threaded read-only Evidence Ledger + the AUTHENTICATED
+ * `customerId` — NEVER a session/model-supplied id (IDOR stays closed: "no
+ * owner" ≠ "any owner"). `handleTurn` invokes it at RENDER-FROM-CLAIMS and
+ * threads the result as `ClaimsRenderContext.activeResources`.
+ *
+ * PURE: plain data in, plain refs out (no clock/RNG/IO). Absent → the render
+ * context carries no `activeResources` (byte-identical to today).
+ */
+export type ActiveResourcesForTurn = (args: {
+  /** This turn's threaded, read-only Evidence Ledger (INVESTIGATE output). */
+  readonly ledger: EvidenceLedger;
+  /** The AUTHENTICATED customer for this turn (the conductor identity). */
+  readonly customerId: string;
+}) => readonly ActiveResourceRef[];
 
 export interface Capsule {
   // ── Identity ──────────────────────────────────────────────────────────────
@@ -150,6 +175,14 @@ export interface Capsule {
    * (byte-identical). The deterministic renderer lives DOWNSTREAM (ibatexas).
    */
   readonly claimsRenderer?: ClaimsRendererPort;
+  /**
+   * Optional per-turn active-resources deriver (the #8 decomposer
+   * ownership-signal seam — see {@link ActiveResourcesForTurn}). When wired AND
+   * this turn produced an Evidence Ledger, RENDER-FROM-CLAIMS threads its
+   * result to the renderer as `ClaimsRenderContext.activeResources`. Absent →
+   * the render context carries no active-resource signal (byte-identical).
+   */
+  readonly activeResourcesForTurn?: ActiveResourcesForTurn;
   readonly tools: ToolRegistry;
   readonly channels: ChannelMap;
   readonly responder: ResponderPort;

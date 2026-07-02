@@ -48,6 +48,28 @@ export interface ClaimsRenderContext {
   /** The raw inbound request text (the §O#8 span-segmenter input the adopter
    *  classifies into span-classes for the §O#15 required-claim decomposer). */
   readonly requestText?: string;
+  /**
+   * The resources ACTIVE for this turn's authenticated customer (the #8
+   * decomposer ownership signal): which owner-scoped resources (e.g. the active
+   * order / pending payment) the required-claim decomposer may demand companions
+   * for. Derived by the adopter's {@link ActiveResourcesForTurn} seam from the
+   * threaded Evidence Ledger + the AUTHENTICATED customerId — NEVER from
+   * session/model-supplied ids ("no owner" ≠ "any owner"; IDOR stays closed).
+   * Optional + structural: absent (seam unwired or no ledger) the renderer
+   * behaves exactly as before (byte-identical). Plain data — the context stays
+   * a PURE input (no clock/RNG).
+   */
+  readonly activeResources?: readonly ActiveResourceRef[];
+}
+
+/**
+ * A single active-resource reference threaded to the renderer. `kind` is the
+ * ADOPTER's resource vocabulary (e.g. "order" / "payment") — claustrum assigns
+ * it no meaning; the pair only parameterizes the adopter's own decomposer.
+ */
+export interface ActiveResourceRef {
+  readonly kind: string;
+  readonly id: string;
 }
 
 /**
