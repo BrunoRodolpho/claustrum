@@ -1,5 +1,13 @@
 # @claustrum/cli
 
+## 0.1.7
+
+### Patch Changes
+
+- Updated dependencies [8a01851]
+  - @claustrum/core@0.7.0
+  - @claustrum/conformance@0.1.6
+
 ## 0.1.6
 
 ### Patch Changes
