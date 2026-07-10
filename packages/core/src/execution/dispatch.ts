@@ -59,19 +59,36 @@ export type DispatchResult =
   | {
       readonly kind: "awaiting_confirmation";
       readonly prompt: string;
+      /** The FIRST parked envelope (byte-compat with the single-envelope path). */
       readonly envelope?: IntentEnvelope;
+      /**
+       * EVERY envelope parked for this confirmation, in plan order (BKL-063). A
+       * multi-envelope plan (a compound customer message) that adjudicates to
+       * REQUEST_CONFIRMATION parks ALL its envelopes, not just `envelopes[0]`, so
+       * none silently vanishes on resume. Present ONLY when more than one was
+       * parked; a single-envelope confirmation omits it (byte-identical) and its
+       * one envelope is `envelope`. Resume reads `session.pendingConfirmations`,
+       * not this field — it is surfaced for observability / adopter UIs.
+       */
+      readonly envelopes?: ReadonlyArray<IntentEnvelope>;
     }
   | {
       readonly kind: "deferred";
       readonly signal: string;
       readonly timeoutMs: number;
+      /** The FIRST deferred envelope (byte-compat with the single-envelope path). */
       readonly envelope?: IntentEnvelope;
+      /** EVERY deferred envelope, in plan order (BKL-063; present only when >1). */
+      readonly envelopes?: ReadonlyArray<IntentEnvelope>;
     }
   | {
       readonly kind: "escalated";
       readonly to: "human" | "supervisor";
       readonly reason: string;
+      /** The FIRST escalated envelope (byte-compat with the single-envelope path). */
       readonly envelope?: IntentEnvelope;
+      /** EVERY envelope queued to handoff, in plan order (BKL-063; present only when >1). */
+      readonly envelopes?: ReadonlyArray<IntentEnvelope>;
     }
   | {
       /**
@@ -211,11 +228,19 @@ export async function dispatchDecision(
     }
 
     case "REQUEST_CONFIRMATION": {
-      const envelope = pickEnvelope(plan);
-      if (envelope !== undefined) {
-        // Park the envelope so the next-turn reply can be matched. If parking
-        // fails the confirmation can never be honored, so surface a failure
-        // rather than falsely telling the user "awaiting confirmation".
+      // adjudicatePlan is transactional (kill-all-or-execute-all): a plan-level
+      // REQUEST_CONFIRMATION gates EVERY envelope, so park EVERY envelope — not
+      // just envelopes[0] (BKL-063). The old pickEnvelope(plan) parked only the
+      // first, silently DROPPING envelopes[1..n] of a compound customer message
+      // so they vanished on resume. Order is preserved and each carries its own
+      // intentHash key, so resume replays the right one per matched reply. The
+      // single-envelope path is byte-identical (loop of one, same park args).
+      const envelopes = frictionEnvelopes(plan);
+      for (const envelope of envelopes) {
+        // Park each so the next-turn reply can be matched. If ANY park fails the
+        // confirmation can never be honored, so surface a failure rather than
+        // falsely telling the user "awaiting confirmation" (same fail-safe as
+        // before, now per-envelope). No mutation ran — parking is a session write.
         try {
           await capsule.session.parkPendingConfirmation(
             capsule.loadedSession.id,
@@ -236,16 +261,17 @@ export async function dispatchDecision(
       return {
         kind: "awaiting_confirmation",
         prompt: decision.prompt,
-        ...(envelope !== undefined ? { envelope } : {}),
+        ...frictionEnvelopeFields(envelopes),
       };
     }
 
     case "DEFER": {
-      const envelope = pickEnvelope(plan);
-      if (envelope !== undefined) {
-        const deferUntil = new Date(
-          Date.now() + decision.timeoutMs,
-        ).toISOString();
+      // Park EVERY deferred envelope, not just envelopes[0] (BKL-063; see
+      // REQUEST_CONFIRMATION). deferUntil is computed ONCE so the whole plan
+      // defers to the same instant. Single-envelope path is byte-identical.
+      const envelopes = frictionEnvelopes(plan);
+      const deferUntil = new Date(Date.now() + decision.timeoutMs).toISOString();
+      for (const envelope of envelopes) {
         try {
           await capsule.session.parkDeferred(
             capsule.loadedSession.id,
@@ -268,13 +294,17 @@ export async function dispatchDecision(
         kind: "deferred",
         signal: decision.signal,
         timeoutMs: decision.timeoutMs,
-        ...(envelope !== undefined ? { envelope } : {}),
+        ...frictionEnvelopeFields(envelopes),
       };
     }
 
     case "ESCALATE": {
-      const envelope = pickEnvelope(plan);
-      if (envelope !== undefined) {
+      // Queue EVERY envelope to the handoff, not just envelopes[0] (BKL-063): a
+      // compound message escalated as a plan must hand the human ALL of it, or
+      // envelopes[1..n] silently vanish. Order preserved. Single-envelope path
+      // is byte-identical (one queue call, same args).
+      const envelopes = frictionEnvelopes(plan);
+      for (const envelope of envelopes) {
         try {
           await capsule.handoff.queue(envelope, decision.reason);
         } catch (e) {
@@ -291,7 +321,7 @@ export async function dispatchDecision(
         kind: "escalated",
         to: decision.to,
         reason: decision.reason,
-        ...(envelope !== undefined ? { envelope } : {}),
+        ...frictionEnvelopeFields(envelopes),
       };
     }
   }
@@ -301,8 +331,42 @@ export async function dispatchDecision(
 export const GENERIC_REFUSAL_TEXT =
   "I can't complete that request right now. Please try again or rephrase.";
 
-function pickEnvelope(plan: Plan): IntentEnvelope | undefined {
-  return plan.envelopes.length > 0 ? plan.envelopes[0] : undefined;
+/**
+ * The envelopes a friction verb (REQUEST_CONFIRMATION / DEFER / ESCALATE) must
+ * park or queue: EVERY envelope of the plan, in order, DEDUPED by `intentHash`
+ * (BKL-063). Dedup prevents a double-park when a plan carries the identical
+ * intent twice (the same intentHash keys one parked slot, and unpark is by
+ * intentHash — two entries under one hash would be resumed/removed ambiguously).
+ * An empty plan yields `[]` (no envelope to park — the verb still returns its
+ * typed result), matching the pre-BKL-063 `pickEnvelope(...) === undefined` path.
+ */
+function frictionEnvelopes(plan: Plan): ReadonlyArray<IntentEnvelope> {
+  const seen = new Set<string>();
+  const out: IntentEnvelope[] = [];
+  for (const envelope of plan.envelopes) {
+    if (seen.has(envelope.intentHash)) continue;
+    seen.add(envelope.intentHash);
+    out.push(envelope);
+  }
+  return out;
+}
+
+/**
+ * The `{ envelope?, envelopes? }` fields shared by the three friction results.
+ * `envelope` is the FIRST parked/queued envelope (byte-compat: a single-envelope
+ * friction verb returns exactly `{ envelope }`, as before). `envelopes` carries
+ * the FULL ordered set and is present ONLY when more than one was parked, so the
+ * single-envelope result shape is byte-identical.
+ */
+function frictionEnvelopeFields(envelopes: ReadonlyArray<IntentEnvelope>): {
+  readonly envelope?: IntentEnvelope;
+  readonly envelopes?: ReadonlyArray<IntentEnvelope>;
+} {
+  const first = envelopes[0];
+  return {
+    ...(first !== undefined ? { envelope: first } : {}),
+    ...(envelopes.length > 1 ? { envelopes } : {}),
+  };
 }
 
 /**
