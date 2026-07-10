@@ -212,7 +212,7 @@ export async function handleTurn(
   //     pipeline produced a `claims` result and a renderer is wired, the model
   //     responder draft MUST NOT reach the customer — keeping it would re-admit
   //     model-authored prose as a confident fact (§O#3). So the rendered text
-  //     supersedes the draft UNCONDITIONALLY; a degenerate-EMPTY render (no
+  //     supersedes the draft BY DEFAULT; a degenerate-EMPTY render (no
   //     renderable claim) falls back to a proposition-free SAFE TERMINAL
   //     (`GENERIC_REFUSAL_TEXT`), NEVER the model draft and NEVER silence. The
   //     adopter's renderer is expected to emit a non-empty proposition-free safe
@@ -220,6 +220,17 @@ export async function handleTurn(
   //     this fail-safe is the loop-level backstop if it does not. The request
   //     surface is threaded so the renderer can run the §O#15 required-claim
   //     completeness gate (F2).
+  //
+  //     PRECEDENCE (BKL-155/153) — the "by default" above is the ONLY policy the
+  //     loop holds, and an adopter may override it PER TURN via the optional
+  //     `claimsRenderPrecedence` port. The render is ALWAYS invoked (its BKL-111
+  //     terminal telemetry + observability side-effects must fire); the port
+  //     gates ONLY whether that render OVERWRITES the draft. It exists because the
+  //     unconditional overwrite clobbered two live-proven turn shapes: a kernel
+  //     REQUEST_CONFIRMATION prompt (the paid-cancel confirm became invisible) and
+  //     a legitimate conversational reply on a STATEMENT turn (thank-you →
+  //     non-sequitur). Absent port ⇒ `"render"` ⇒ byte-identical to 0.6.0. On
+  //     `"keep_draft"` the responder draft stands and still passes 6b below.
   if (claims !== undefined && capsule.claimsRenderer !== undefined) {
     // #8 decomposer ownership signal — derived ONLY from this turn's threaded
     // ledger + the AUTHENTICATED customerId (never session/model ids), so the
@@ -236,13 +247,28 @@ export async function handleTurn(
       requestText: perception.text,
       ...(activeResources !== undefined ? { activeResources } : {}),
     });
-    draft = {
-      ...draft,
-      text:
-        renderedFromClaims.text.trim() !== ""
-          ? renderedFromClaims.text
-          : GENERIC_REFUSAL_TEXT,
-    };
+    // Ask the adopter whether the render supersedes the draft for THIS turn. Core
+    // holds NO policy — default (absent port) is "render", byte-identical to the
+    // unconditional 0.6.0 supersession. The render above already ran, so its
+    // BKL-111 terminal telemetry + observability side-effects fired regardless of
+    // the answer; only the overwrite of `draft` is gated. On "keep_draft" the
+    // responder draft is left untouched and step 6b (OUTPUT FIREWALL) runs on it.
+    const renderPrecedence =
+      capsule.claimsRenderPrecedence?.({
+        decision,
+        plan,
+        claims,
+        requestText: perception.text,
+      }) ?? "render";
+    if (renderPrecedence === "render") {
+      draft = {
+        ...draft,
+        text:
+          renderedFromClaims.text.trim() !== ""
+            ? renderedFromClaims.text
+            : GENERIC_REFUSAL_TEXT,
+      };
+    }
   }
 
   // 6b. OUTPUT FIREWALL (optional, F1) — gate the draft through the kernel when

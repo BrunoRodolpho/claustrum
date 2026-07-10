@@ -37,6 +37,7 @@ import {
   EvidenceLedger,
   type CandidateClaim,
   type ClaimsKernelDeps,
+  type Decision,
   type EvidenceEntryInput,
   type IntentEnvelope,
 } from "@adjudicate/core";
@@ -47,10 +48,12 @@ import {
   runClaimsValidate,
   type ActiveResourceRef,
   type ActiveResourcesForTurn,
+  type Adjudicator,
   type CapabilityId,
   type ChannelMessage,
   type ClaimPlannerPort,
   type ClaimsRendererPort,
+  type ClaimsRenderPrecedence,
   type IntentKind,
   type InvestigatorPort,
   type Plan,
@@ -298,7 +301,10 @@ interface BundleOpts {
   readonly claimPlanner?: ClaimPlannerPort;
   readonly withKernelDeps?: boolean;
   readonly claimsRenderer?: ClaimsRendererPort;
+  readonly claimsRenderPrecedence?: ClaimsRenderPrecedence;
   readonly activeResourcesForTurn?: ActiveResourcesForTurn;
+  /** Arm the OUTPUT FIREWALL (tenant flag on) so a test can observe step 6b. */
+  readonly enableOutputFirewall?: boolean;
 }
 
 function makeBundle(opts: BundleOpts) {
@@ -308,6 +314,26 @@ function makeBundle(opts: BundleOpts) {
   const executed = { count: 0 };
   const tools = createToolRegistry();
   tools.register(makeTool(executed));
+  // Resolve the tenant WITH the output-adjudication flag when the firewall is
+  // being exercised; otherwise the default (flagless) resolver.
+  const resolver: TenantResolver =
+    opts.enableOutputFirewall === true
+      ? {
+          async resolve() {
+            return {
+              tenant: {
+                tenantId: "t",
+                displayName: "T",
+                locale: "pt-BR",
+                environment: "dev",
+                flags: { enable_output_adjudication: true },
+              },
+              state: { balanceOk: true },
+              policy: {},
+            };
+          },
+        }
+      : tenantResolver;
   const conductor = createConductor({
     adjudicator,
     memory: new InMemoryMemoryProvider(),
@@ -320,11 +346,14 @@ function makeBundle(opts: BundleOpts) {
     session,
     tools,
     channels: [channel],
-    tenantResolver,
+    tenantResolver: resolver,
     ...(opts.investigator !== undefined ? { investigator: opts.investigator } : {}),
     ...(opts.claimPlanner !== undefined ? { claimPlanner: opts.claimPlanner } : {}),
     ...(opts.withKernelDeps !== false ? { claimsKernel } : {}),
     ...(opts.claimsRenderer !== undefined ? { claimsRenderer: opts.claimsRenderer } : {}),
+    ...(opts.claimsRenderPrecedence !== undefined
+      ? { claimsRenderPrecedence: opts.claimsRenderPrecedence }
+      : {}),
     ...(opts.activeResourcesForTurn !== undefined
       ? { activeResourcesForTurn: opts.activeResourcesForTurn }
       : {}),
@@ -849,5 +878,130 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
       { subject: ORDER, type: "STORE_OPEN_NOW", verdict: "UNKNOWN" },
     ]);
     expect(result!.terminal).not.toBe("RENDER");
+  });
+
+  // ── RENDER-vs-DRAFT PRECEDENCE (BKL-155/153) ────────────────────────────────
+  // The claims render supersedes the draft BY DEFAULT (step 6a). The optional
+  // `claimsRenderPrecedence` port lets the adopter say "keep_draft" for a turn
+  // where the render would clobber a REQUEST_CONFIRMATION prompt or a legitimate
+  // conversational reply. Core holds no policy: absent port ⇒ "render".
+
+  const RENDER_REQUEST_TEXT = "por que meu pedido está atrasado?";
+
+  it("PRECEDENCE absent port: the claims render supersedes the draft (byte-identical to 0.6.0)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims) => ({ text: `RENDERED[${claims.terminal}]` }),
+    };
+    // No `claimsRenderPrecedence` wired → the loop defaults to "render".
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    // The render wins — exactly the pre-seam supersession.
+    expect(result.response.text).toBe(`RENDERED[${result.claims?.terminal ?? ""}]`);
+    expect(result.response.text.startsWith("ok:")).toBe(false);
+  });
+
+  it("PRECEDENCE render: explicitly returning 'render' supersedes the draft (unchanged from 0.6.0)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims) => ({ text: `RENDERED[${claims.terminal}]` }),
+    };
+    const claimsRenderPrecedence: ClaimsRenderPrecedence = () => "render";
+    const { conductor } = makeBundle({
+      investigator,
+      claimPlanner,
+      claimsRenderer,
+      claimsRenderPrecedence,
+    });
+
+    const result = await runTurn(conductor);
+
+    expect(result.response.text).toBe(`RENDERED[${result.claims?.terminal ?? ""}]`);
+    expect(result.response.text.startsWith("ok:")).toBe(false);
+  });
+
+  it("PRECEDENCE keep_draft: the responder draft STANDS, yet the claims render is STILL called (telemetry/side-effects preserved) and the OUTPUT FIREWALL runs on the KEPT draft", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let renderCalls = 0;
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims) => {
+        renderCalls += 1; // observable side-effect stand-in for the BKL-111 telemetry
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const claimsRenderPrecedence: ClaimsRenderPrecedence = () => "keep_draft";
+    const { conductor, adjudicator } = makeBundle({
+      investigator,
+      claimPlanner,
+      claimsRenderer,
+      claimsRenderPrecedence,
+      enableOutputFirewall: true,
+    });
+    // Arm the OUTPUT FIREWALL (step 6b) to observe which draft it receives; EXECUTE
+    // = pass the draft through unchanged. Assigned through the Adjudicator port
+    // (the optional method is not declared on the stub class).
+    let firewallSawText: string | undefined;
+    (adjudicator as Adjudicator).adjudicateOutput = async (draft) => {
+      firewallSawText = draft.text;
+      return { kind: "EXECUTE", basis: [] } as Decision;
+    };
+
+    const result = await runTurn(conductor);
+
+    expect(result.claims).toBeDefined();
+    // The render STILL ran — the port gates the OVERWRITE, not the render call.
+    expect(renderCalls).toBe(1);
+    // …but the model-responder draft reaches the customer, NOT the claims render.
+    expect(result.response.text).toBe(`ok: ${RENDER_REQUEST_TEXT}`);
+    expect(result.response.text.startsWith("RENDERED[")).toBe(false);
+    // …and the OUTPUT FIREWALL ran on the KEPT draft (not the discarded render).
+    expect(firewallSawText).toBe(`ok: ${RENDER_REQUEST_TEXT}`);
+  });
+
+  it("PRECEDENCE context: the port receives this turn's decision + plan + claims + requestText", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims) => ({ text: `RENDERED[${claims.terminal}]` }),
+    };
+    let seen:
+      | Parameters<ClaimsRenderPrecedence>[0]
+      | undefined;
+    const claimsRenderPrecedence: ClaimsRenderPrecedence = (ctx) => {
+      seen = ctx;
+      return "render";
+    };
+    const { conductor } = makeBundle({
+      investigator,
+      claimPlanner,
+      claimsRenderer,
+      claimsRenderPrecedence,
+    });
+
+    const result = await runTurn(conductor);
+
+    expect(seen).toBeDefined();
+    // The perceived inbound request surface is threaded verbatim.
+    expect(seen!.requestText).toBe(RENDER_REQUEST_TEXT);
+    // The SAME claims result the turn surfaces (identity, not a copy).
+    expect(seen!.claims).toBe(result.claims);
+    // The adjudicated Decision + the adjudicated plan are in scope.
+    expect(seen!.decision.kind).toBe(result.decision.kind);
+    expect(Array.isArray(seen!.plan.envelopes)).toBe(true);
+    expect(seen!.plan).toBe(result.plan);
   });
 });

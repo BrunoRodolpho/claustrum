@@ -24,6 +24,7 @@ import type {
   Capsule,
   ChannelMap,
   ClaimsKernelDepsForTurn,
+  ClaimsRenderPrecedence,
 } from "./capsule.js";
 import type {
   Adjudicator,
@@ -99,6 +100,16 @@ export interface ConductorOptions {
    * adopter (ibatexas's `renderer-from-claims`), not forced on every conductor.
    */
   readonly claimsRenderer?: ClaimsRendererPort;
+  /**
+   * Optional render-vs-draft precedence seam (BKL-155/153 — see
+   * {@link ClaimsRenderPrecedence}). Threaded straight onto the Capsule; when
+   * present AND RENDER-FROM-CLAIMS is about to supersede the draft, handleTurn
+   * asks it whether to apply the overwrite (`"render"`) or keep the responder
+   * draft (`"keep_draft"`). The render still runs either way (telemetry/
+   * side-effects preserved); only the overwrite is gated. Absent → `"render"`
+   * (byte-identical). Wired by the downstream adopter (ibatexas).
+   */
+  readonly claimsRenderPrecedence?: ClaimsRenderPrecedence;
   /**
    * Optional per-turn active-resources deriver (the #8 decomposer
    * ownership-signal seam — see {@link ActiveResourcesForTurn}). Threaded
@@ -361,6 +372,12 @@ export function createConductor(options: ConductorOptions): Conductor {
         // reply from claims (the "claims-not-prose" thesis); absent → unchanged.
         ...(options.claimsRenderer !== undefined
           ? { claimsRenderer: options.claimsRenderer }
+          : {}),
+        // Render-vs-draft precedence seam (BKL-155/153) — optional; threaded
+        // straight through. When present, handleTurn asks it whether the claims
+        // render supersedes the draft this turn; absent → "render" (byte-identical).
+        ...(options.claimsRenderPrecedence !== undefined
+          ? { claimsRenderPrecedence: options.claimsRenderPrecedence }
           : {}),
         // #8 decomposer ownership signal — optional; threaded straight through.
         // RENDER-FROM-CLAIMS derives activeResources from the turn's ledger +

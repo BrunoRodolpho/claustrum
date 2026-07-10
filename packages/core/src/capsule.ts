@@ -17,6 +17,7 @@
 
 import type {
   ClaimsKernelDeps,
+  ClaimsKernelResult,
   Decision,
   EvidenceLedger,
   IntentEnvelope,
@@ -38,7 +39,7 @@ import type { GroundingPort } from "./ports/grounding.js";
 import type { HandoffPort } from "./ports/handoff.js";
 import type { InvestigatorPort } from "./ports/investigator.js";
 import type { MemoryPort } from "./ports/memory.js";
-import type { PlannerPort } from "./ports/planner.js";
+import type { Plan, PlannerPort } from "./ports/planner.js";
 import type { ResolverPort } from "./ports/resolver.js";
 import type { ResponderPort } from "./ports/responder.js";
 import type { Session, SessionPort } from "./ports/session.js";
@@ -108,6 +109,44 @@ export type ActiveResourcesForTurn = (args: {
   readonly customerId: string;
 }) => readonly ActiveResourceRef[];
 
+/**
+ * Render-vs-draft precedence seam (BKL-155/153) — the adopter decides, per turn,
+ * whether the deterministic claims render SUPERSEDES the model-responder draft
+ * or whether the draft is KEPT.
+ *
+ * RENDER-FROM-CLAIMS (handleTurn step 6a) otherwise overwrites the draft's text
+ * with the claims render UNCONDITIONALLY whenever the claim pipeline produced a
+ * result. That is right for a factual answer turn, but wrong for two turn shapes
+ * the adopter (ibatexas) live-proved:
+ *   - a kernel REQUEST_CONFIRMATION prompt (e.g. a paid-cancel confirm) the
+ *     render would clobber, making the confirmation invisible; and
+ *   - a legitimate conversational reply on a pure STATEMENT turn (a "thank you"),
+ *     which the render would replace with a non-sequitur.
+ * Returning `"keep_draft"` for exactly those turns keeps the responder reply.
+ *
+ * POLICY-FREE at the core: claustrum never inspects decision/plan/claims to
+ * decide — it only ASKS this port and defaults to `"render"` when it is absent,
+ * so an adopter that does not wire it gets byte-identical 0.6.0 behavior. The
+ * claims render is STILL invoked regardless of the answer (its BKL-111 terminal
+ * telemetry + observability side-effects fire unconditionally); only the DRAFT
+ * OVERWRITE is gated. On `"keep_draft"` the responder draft stands and still
+ * passes the OUTPUT FIREWALL (step 6b) before egress.
+ *
+ * PURE: plain data in, a discriminant out (no clock/RNG/IO). Consulted ONLY on
+ * the rendered path (a claims result exists AND a `claimsRenderer` is wired) —
+ * when nothing renders there is no draft-vs-render choice to make.
+ */
+export type ClaimsRenderPrecedence = (ctx: {
+  /** This turn's adjudicated Decision (e.g. EXECUTE vs REQUEST_CONFIRMATION). */
+  readonly decision: Decision;
+  /** The resolved/resumed plan that was adjudicated this turn. */
+  readonly plan: Plan;
+  /** The CLAIMS-VALIDATE result (renderable set + turn terminal) about to render. */
+  readonly claims: ClaimsKernelResult;
+  /** The perceived inbound request text (the §O#8 span-segmenter input). */
+  readonly requestText: string;
+}) => "render" | "keep_draft";
+
 export interface Capsule {
   // ── Identity ──────────────────────────────────────────────────────────────
   readonly tenant: TenantConfig;
@@ -175,6 +214,17 @@ export interface Capsule {
    * (byte-identical). The deterministic renderer lives DOWNSTREAM (ibatexas).
    */
   readonly claimsRenderer?: ClaimsRendererPort;
+  /**
+   * Optional render-vs-draft precedence seam (BKL-155/153 — see
+   * {@link ClaimsRenderPrecedence}). When wired AND RENDER-FROM-CLAIMS is about
+   * to supersede the draft, `handleTurn` asks this port whether to apply the
+   * overwrite (`"render"`) or keep the responder draft (`"keep_draft"`). The
+   * claims render is invoked either way (telemetry/side-effects preserved); only
+   * the draft overwrite is gated. Absent → `"render"` (byte-identical to 0.6.0).
+   * Wired by the downstream adopter (ibatexas), which returns `"keep_draft"` on a
+   * REQUEST_CONFIRMATION prompt turn and on a pure conversational STATEMENT turn.
+   */
+  readonly claimsRenderPrecedence?: ClaimsRenderPrecedence;
   /**
    * Optional per-turn active-resources deriver (the #8 decomposer
    * ownership-signal seam — see {@link ActiveResourcesForTurn}). When wired AND
