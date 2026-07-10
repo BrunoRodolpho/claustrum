@@ -1,5 +1,66 @@
 # @claustrum/core
 
+## 0.6.0
+
+### Minor Changes
+
+- 28b10d8: ClaimPlannerPort carries a forced turn terminal (ESCALATE/CLARIFY) — BKL-077.
+
+  `ClaimPlannerPort.propose` may now return either the legacy
+  `ReadonlyArray<CandidateClaim>` OR the widened `{ candidates, forcedTerminal? }`
+  (`ClaimPlannerProposal`), where `forcedTerminal` is a `ClaimPlannerForcedTerminal`
+  = `"ESCALATE" | "CLARIFY"`. This is a NON-BREAKING widening: every existing
+  adopter planner (and test double) returns the bare array and is byte-identical
+  after the change — the single CLAIMS-VALIDATE call seam normalizes it via
+  `normalizeClaimPlannerResult` to `{ candidates, forcedTerminal: undefined }`, so
+  no terminal is ever forced.
+
+  A planner that computes a terminal the deterministic P1∘P2 gates cannot see — a
+  SAFETY `ESCALATE` (allergen / unrecognized health marker, SDD §O#9) or an
+  AMBIGUITY `CLARIFY` (a customer with 3 payments asking "is my payment done?" →
+  "which order?", SDD §J.8) — can now surface it. Before this change the terminal
+  was DISCARDED: the ESCALATE silently became `UNKNOWN`, and a `CLARIFY` with no
+  bindable candidate fell through to the legacy responder as a generic deflection
+  (both live-proven in ibatexas).
+
+  `runClaimsValidate` HONORS the forced terminal via the spec precedence
+  (`resolveTurnTerminal`, now exported):
+  - forced `ESCALATE` OUTRANKS everything, including a would-be `RENDER` (SDD §O#9
+    / §J.7 fail-closed) — and suppresses the renderable set so the safety route
+    cannot leak the answer it overrode;
+  - forced `CLARIFY` YIELDS to a complete `RENDER` (never withhold a validated
+    answer) and to a kernel `ESCALATE` (monotonic escalation), but OVERRIDES an
+    honest-ignorance `UNKNOWN`;
+  - a forced terminal is honored even when `candidates` is EMPTY (the 3-payments
+    case), so the turn no longer falls through to a generic deflection.
+
+  `perClaim` and the `consistency` sub-record are always preserved (P4
+  completeness — every candidate keeps its explicit verdict). New barrel exports:
+  `ClaimPlannerProposal`, `ClaimPlannerResult`, `ClaimPlannerForcedTerminal`,
+  `normalizeClaimPlannerResult`, `resolveTurnTerminal`.
+
+### Patch Changes
+
+- c45b28a: dispatch parks ALL friction-verb envelopes, not just envelopes[0] — BKL-063.
+
+  `adjudicatePlan` is transactional (kill-all-or-execute-all), so a plan-level
+  friction verd (REQUEST_CONFIRMATION / DEFER / ESCALATE) gates EVERY envelope.
+  `dispatchDecision` previously parked/queued only `envelopes[0]` (`pickEnvelope`),
+  so the second envelope of a compound customer message silently VANISHED on
+  resume (ibatexas ground-truth L4 sibling). Dispatch now parks/queues EVERY
+  envelope, in plan order, each keyed by its own `intentHash`:
+  - REQUEST_CONFIRMATION parks every envelope as a pending confirmation;
+  - DEFER parks every envelope as deferred (one shared `deferUntil` for the plan);
+  - ESCALATE queues every envelope to the HandoffPort.
+
+  Envelopes are deduped by `intentHash` (no double-park). The single-envelope path
+  is byte-identical — same park/queue args and the same `{ envelope }` result
+  shape. Each friction result now also carries an optional `envelopes` field (the
+  full ordered set, present only when more than one was parked) for observability;
+  resume itself reads `session.pendingConfirmations` / `deferredEnvelopes`, so the
+  per-envelope state is preserved and each parked envelope resumes independently. A
+  friction verb still executes nothing (no mutation runs).
+
 ## 0.5.0
 
 ### Minor Changes
