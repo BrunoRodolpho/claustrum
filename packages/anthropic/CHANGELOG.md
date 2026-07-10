@@ -1,5 +1,12 @@
 # @claustrum/anthropic
 
+## 0.1.6
+
+### Patch Changes
+
+- Updated dependencies [8a01851]
+  - @claustrum/core@0.7.0
+
 ## 0.1.5
 
 ### Patch Changes
