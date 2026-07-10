@@ -21,6 +21,7 @@ export type {
   Capsule,
   ChannelMap,
   ClaimsKernelDepsForTurn,
+  ClaimsRenderPrecedence,
 } from "./capsule.js";
 export { handleTurn, type TurnResult } from "./handle-turn.js";
 
