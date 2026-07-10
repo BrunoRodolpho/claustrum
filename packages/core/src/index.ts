@@ -103,10 +103,15 @@ export type {
 export type {
   ClaimPlannerPort,
   ClaimPlannerInput,
+  ClaimPlannerProposal,
+  ClaimPlannerResult,
+  ClaimPlannerForcedTerminal,
 } from "./ports/claim-planner.js";
+export { normalizeClaimPlannerResult } from "./ports/claim-planner.js";
 export {
   runInvestigate,
   runClaimsValidate,
+  resolveTurnTerminal,
 } from "./claims-loop/index.js";
 export type {
   ActiveResourceRef,

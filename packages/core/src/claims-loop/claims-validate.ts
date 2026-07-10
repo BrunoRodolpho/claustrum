@@ -36,9 +36,15 @@ import {
   type ClaimsKernelDeps,
   type ClaimsKernelResult,
   type EvidenceLedger,
+  type TurnTerminal,
 } from "@adjudicate/core";
 import type { Capsule } from "../capsule.js";
 import type { CognitiveState, Plan } from "../ports/planner.js";
+import {
+  normalizeClaimPlannerResult,
+  type ClaimPlannerForcedTerminal,
+  type ClaimPlannerResult,
+} from "../ports/claim-planner.js";
 
 /**
  * Run the CLAIMS-VALIDATE stage. Returns the kernel result (renderable set +
@@ -80,14 +86,14 @@ export async function runClaimsValidate(
   // claim, do NOT emit a partial/garbage candidate from a failed parse, and do NOT
   // map the failure to a spurious claims-`UNKNOWN` terminal — a planner that could
   // not produce candidates asserted nothing, so the turn asserts nothing.
-  let candidates: ReadonlyArray<CandidateClaim>;
+  let proposed: ClaimPlannerResult;
   try {
     // Thread the AUTHENTICATED principal + this turn's read-only ledger to the
     // claim planner so an owner-scoped candidate's actor + subject derive from the
     // authenticated identity / owner-scoped reads, NEVER the model's self-assertion
     // (IDOR-safe — SDD §E C1, Inv 2). INVESTIGATE (step 4b) already populated the
     // ledger, so the planner sees the owner-scoped reads that resolved PRESENT.
-    candidates = await capsule.claimPlanner.propose({
+    proposed = await capsule.claimPlanner.propose({
       cognition,
       plan,
       customerId: capsule.customerId,
@@ -106,14 +112,39 @@ export async function runClaimsValidate(
     return undefined;
   }
 
-  // EMPTY candidate set = nothing to assert (a greeting / smalltalk turn).
-  // The pure kernel would map a non-suppressed RENDER terminal with an empty
-  // renderable set to a terminal `UNKNOWN` (kernels.ts §I/§K) — but `UNKNOWN`
-  // is honest ignorance about a REQUESTED claim, NOT "there was nothing to
-  // claim" (SDD §I/§K). Returning no claims result here keeps the turn from
-  // carrying a spurious claims-`UNKNOWN`; the stage is byte-equivalent to an
-  // unwired pipeline for a turn with no candidate claims.
-  if (candidates.length === 0) return undefined;
+  // Normalize the widened `propose` return (BKL-077): the planner may hand back
+  // the legacy bare `CandidateClaim[]` OR `{ candidates, forcedTerminal? }`. This
+  // is the ONE seam that discriminates the union; everything below works on the
+  // normalized `{ candidates, forcedTerminal }`. A legacy-array planner
+  // normalizes to `forcedTerminal: undefined` → byte-identical to before.
+  const { candidates, forcedTerminal } = normalizeClaimPlannerResult(proposed);
+
+  // EMPTY candidate set = nothing to VALIDATE. Two sub-cases:
+  //
+  //  (a) NO forced terminal — a greeting / smalltalk turn. The pure kernel would
+  //      map a non-suppressed RENDER terminal with an empty renderable set to a
+  //      terminal `UNKNOWN` (kernels.ts §I/§K) — but `UNKNOWN` is honest ignorance
+  //      about a REQUESTED claim, NOT "there was nothing to claim" (SDD §I/§K).
+  //      Returning no claims result keeps the turn from carrying a spurious
+  //      claims-`UNKNOWN`; the stage is byte-equivalent to an unwired pipeline.
+  //
+  //  (b) A forced terminal WITH no candidate (BKL-077 — the live-proven bug): a
+  //      customer with 3 payments asking "is my payment done?" frames a CLARIFY
+  //      ("which order?") but NO bindable candidate; an unrecognized safety marker
+  //      forces ESCALATE with nothing to render. The pre-widening loop discarded
+  //      the terminal and fell through to the legacy responder, masking the
+  //      CLARIFY into a generic deflection / the ESCALATE into UNKNOWN. Honor it:
+  //      terminate the turn ON that terminal over an empty (honest) kernel result.
+  if (candidates.length === 0) {
+    if (forcedTerminal === undefined) return undefined;
+    // Run the kernel over the empty candidate set for a faithful, well-formed
+    // result (perClaim/renderable/renderableCanonical all empty; a genuine empty
+    // consistency sub-record), then stamp the forced terminal at the turn level.
+    return applyForcedTerminal(
+      runClaimsKernel(ledger, [], capsule.claimsKernel),
+      forcedTerminal,
+    );
+  }
 
   // ── PER-TURN RECONCILIATION (post-INVESTIGATE / pre-kernel) ──────────────────
   // The single coherent point where THIS turn's live evidence is reconciled into
@@ -216,5 +247,89 @@ export async function runClaimsValidate(
   // P1 ∘ P2 over the threaded snapshot. PURE: same ledger + candidates + deps ⟹
   // same result. The kernel CONSUMES the ledger (read-only); this stage does not
   // mutate it (one-directional topology — SDD §F).
-  return runClaimsKernel(ledger, reconciledCandidates, deps);
+  const base = runClaimsKernel(ledger, reconciledCandidates, deps);
+
+  // BKL-077 — HONOR a planner-forced terminal over the kernel result, per the
+  // spec precedence (see `resolveTurnTerminal`). `forcedTerminal === undefined`
+  // (every legacy-array planner) returns `base` unchanged (byte-identical).
+  return applyForcedTerminal(base, forcedTerminal);
+}
+
+/**
+ * The turn terminal PRECEDENCE (BKL-077; SDD §I first-class ESCALATE/CLARIFY;
+ * §O#9 safety default-to-safe; §J.7 safety-gate fail-closed; §J.8 no-silent-drop;
+ * the merged-architecture MONOTONIC-ESCALATION direction). Given the kernel's
+ * computed terminal and an OPTIONAL planner-forced terminal, pick the effective
+ * turn terminal. PURE.
+ *
+ *   - no forced terminal            → the kernel terminal (byte-identical legacy).
+ *   - forced `ESCALATE` (SAFETY)    → `ESCALATE`, OUTRANKING EVERYTHING, incl. a
+ *                                     would-be `RENDER`: an allergen / unrecognized
+ *                                     safety marker must route to a human even if
+ *                                     some claim validated (SDD §O#9 / §J.7). A
+ *                                     validated answer is not safe to render when a
+ *                                     safety marker fired.
+ *   - forced `CLARIFY` (AMBIGUITY)  → yields UP the safety lattice, never down:
+ *       · kernel `RENDER`   → `RENDER`   — never withhold a genuinely
+ *                                          validated+consistent answer to ask a
+ *                                          needless clarifying question.
+ *       · kernel `ESCALATE` → `ESCALATE` — never DOWNGRADE a safety / consistency
+ *                                          escalation to a clarification
+ *                                          (monotonic escalation).
+ *       · kernel `UNKNOWN`/`CLARIFY` → `CLARIFY` — a disambiguation ("which
+ *                                          order?") is more useful and honest than
+ *                                          a flat honest-ignorance `UNKNOWN`
+ *                                          (SDD §J.8 — an unmapped span forces
+ *                                          CLARIFY, never a silent drop).
+ *
+ * Safety envelope: the ONLY downward move this permits is a would-be `RENDER`
+ * being SUPPRESSED up to `ESCALATE`; a forced terminal can never turn a
+ * non-RENDER into a RENDER (the planner cannot MANUFACTURE a render — that is
+ * earned by P1∘P2 alone).
+ */
+export function resolveTurnTerminal(
+  kernelTerminal: TurnTerminal,
+  forcedTerminal: ClaimPlannerForcedTerminal | undefined,
+): TurnTerminal {
+  if (forcedTerminal === undefined) return kernelTerminal;
+  if (forcedTerminal === "ESCALATE") return "ESCALATE";
+  // forcedTerminal === "CLARIFY": yields to a complete RENDER and to a kernel
+  // ESCALATE; otherwise (UNKNOWN / CLARIFY) the ambiguity CLARIFY wins.
+  if (kernelTerminal === "RENDER" || kernelTerminal === "ESCALATE") {
+    return kernelTerminal;
+  }
+  return "CLARIFY";
+}
+
+/**
+ * Fold a planner-forced terminal into a kernel result (BKL-077). Returns `result`
+ * UNCHANGED when nothing is forced or the forced terminal does not supersede the
+ * kernel's (byte-identical). When the terminal DOES change it can only move to a
+ * non-RENDER terminal (`ESCALATE`/`CLARIFY` — a forced CLARIFY that met a kernel
+ * RENDER returned early via {@link resolveTurnTerminal}); a non-RENDER turn must
+ * carry NO renderable set, so BOTH `renderable` and `renderableCanonical` are
+ * emptied:
+ *   - `renderableCanonical` is the renderer's REQUIRED input and is defined as
+ *     non-empty ONLY under `RENDER` (kernel inv.17) — leaving it populated would
+ *     break that invariant;
+ *   - `renderable` is dropped too so a forced SAFETY `ESCALATE` cannot surface the
+ *     very validated claim it is suppressing (defense-in-depth — the safety route
+ *     must not leak the answer it overrode).
+ * `perClaim` and the `consistency` sub-record are PRESERVED: every candidate keeps
+ * its explicit §5 verdict (P4 completeness), and the consistency record stays a
+ * faithful audit of what the P2 gate actually decided (the forced terminal is a
+ * turn-level override, not a rewrite of the gate's own finding). PURE.
+ */
+function applyForcedTerminal(
+  result: ClaimsKernelResult,
+  forcedTerminal: ClaimPlannerForcedTerminal | undefined,
+): ClaimsKernelResult {
+  const effective = resolveTurnTerminal(result.terminal, forcedTerminal);
+  if (effective === result.terminal) return result;
+  return {
+    ...result,
+    terminal: effective,
+    renderable: [],
+    renderableCanonical: [],
+  };
 }

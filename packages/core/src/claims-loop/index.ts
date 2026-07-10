@@ -14,4 +14,4 @@
  */
 
 export { runInvestigate } from "./investigate.js";
-export { runClaimsValidate } from "./claims-validate.js";
+export { runClaimsValidate, resolveTurnTerminal } from "./claims-validate.js";
