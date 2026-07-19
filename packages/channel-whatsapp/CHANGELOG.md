@@ -1,5 +1,13 @@
 # @claustrum/channel-whatsapp
 
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [67cb44d]
+- Updated dependencies [d06d12d]
+  - @claustrum/core@0.8.0
+
 ## 0.3.3
 
 ### Patch Changes

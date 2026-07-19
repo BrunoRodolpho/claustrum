@@ -1,5 +1,66 @@
 # @claustrum/core
 
+## 0.8.0
+
+### Minor Changes
+
+- 67cb44d: Widen `ClaimsRenderContext` with three additive optional carrier fields for the
+  adopter's claims renderer (ibatexas riders BKL-117 / BKL-152 / BKL-170):
+  - `turnId?: string` — the loop's own per-turn id, the join key the adopter uses
+    to correlate a rendered `claims.terminal` back to its `turn_trace` row
+    (BKL-117). This one is claustrum-native, so `handleTurn` threads it straight
+    into the render context (like `requestText`) — a pure carrier, no logic.
+  - `resolvedQueryDate?: string` — an ISO `YYYY-MM-DD`, the deterministically
+    resolved queried schedule date the adopter's §O#15 required-claim decomposer
+    reads to suppress the exact `weekday == today` decomposition (BKL-152).
+  - `disambiguationCandidates?: readonly { kind; id; label }[]` — the concrete
+    options the adopter's renderer offers back on a CLARIFY-with-candidates
+    terminal (BKL-170).
+
+  All three are optional + structural, so a context that omits them is byte-
+  identical to today. `resolvedQueryDate` and `disambiguationCandidates` are
+  ADOPTER-owned domain values — claustrum assigns them no meaning and has no
+  native source, so it only publishes the type surface (the adopter threads them
+  from its resolver output); no derivation seam is added and no claustrum behavior
+  changes. Mirrors the additive-optional discipline of `activeResources`.
+
+- d06d12d: Add the `RenderCarriersForTurn` populating seam so the adopter can SET the two
+  domain-owned `ClaimsRenderContext` carriers, mirroring the `ActiveResourcesForTurn`
+  precedent EXACTLY.
+
+  `ClaimsRenderContext.turnId` is claustrum-native (threaded directly by
+  `handleTurn`), but `resolvedQueryDate` (BKL-152) and `disambiguationCandidates`
+  (BKL-170) are ADOPTER-computed domain values (ibatexas `resolveQueriedScheduleDate`
+  - the read executor's disambiguation) — without a populating seam those two
+    carriers were unreachable and the type widening was hollow.
+
+  This adds ONE non-breaking optional per-turn deriver, threaded at every
+  `activeResourcesForTurn` touchpoint in lockstep (ConductorOptions → Capsule →
+  `handleTurn` render context spread → barrel export):
+
+  ```ts
+  export type RenderCarriersForTurn = (args: {
+    ledger: EvidenceLedger; // this turn's read-only Evidence Ledger
+    customerId: string; // the AUTHENTICATED customer
+    requestText: string; // the inbound request text
+  }) => Pick<
+    ClaimsRenderContext,
+    "resolvedQueryDate" | "disambiguationCandidates"
+  >;
+  ```
+
+  At RENDER-FROM-CLAIMS the loop invokes `capsule.renderCarriersForTurn({ ledger,
+customerId, requestText })` (only when a ledger exists) and SPREADS the result
+  into the `ClaimsRenderContext` handed to the renderer — pure carrier passthrough,
+  no claustrum logic, the adopter owns the derivation. Return only the carriers you
+  resolved; omit a field and it stays absent.
+
+  NON-BREAKING: the seam is optional and derives ONLY from the threaded ledger +
+  the AUTHENTICATED customerId + request text (never session/model ids — IDOR stays
+  closed). An adopter that does not wire it gets neither carrier — byte-identical.
+  `RenderCarriersForTurn` is barrel-exported from `@claustrum/core` and threaded
+  through the Conductor like the other claims seams.
+
 ## 0.7.0
 
 ### Minor Changes
