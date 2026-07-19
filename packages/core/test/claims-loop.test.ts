@@ -52,6 +52,7 @@ import {
   type CapabilityId,
   type ChannelMessage,
   type ClaimPlannerPort,
+  type ClaimsRenderContext,
   type ClaimsRendererPort,
   type ClaimsRenderPrecedence,
   type IntentKind,
@@ -718,6 +719,75 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     await runTurn(conductor);
 
     expect(seenActiveResources).toBeUndefined();
+  });
+
+  it("RENDER-FROM-CLAIMS threads the loop turnId into the render context (BKL-117 claims.terminal↔turn_trace join carrier)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let seenTurnId: string | undefined = "UNSET";
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        seenTurnId = context?.turnId;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    // Open the capsule here (rather than via `runTurn`) so we can read the loop's
+    // OWN per-turn id and prove the renderer received THAT id — a pure carrier the
+    // loop owns natively, never a fabricated value.
+    const capsule = await conductor.openCapsule({
+      channel: "web",
+      customerId: CUSTOMER,
+      inbound: inbound("por que meu pedido está atrasado?"),
+    });
+    await handleTurn(capsule, inbound("por que meu pedido está atrasado?"));
+    await conductor.closeCapsule(capsule);
+
+    expect(seenTurnId).toBe(capsule.turnId);
+    expect(typeof seenTurnId).toBe("string");
+    expect(seenTurnId).not.toBe("");
+  });
+
+  it("ClaimsRenderContext contract: a context WITHOUT turnId/resolvedQueryDate/disambiguationCandidates is valid — absent === byte-identical", () => {
+    // The three carriers are additive + optional: a context that omits them still
+    // type-checks and reads each back as `undefined` (no signal), so a renderer
+    // that ignores them behaves exactly as before.
+    const minimal: ClaimsRenderContext = {
+      requestText: "por que meu pedido está atrasado?",
+    };
+    expect(minimal.turnId).toBeUndefined();
+    expect(minimal.resolvedQueryDate).toBeUndefined();
+    expect(minimal.disambiguationCandidates).toBeUndefined();
+
+    // Every field is optional — a fully-empty context is also valid.
+    const empty: ClaimsRenderContext = {};
+    expect(empty.turnId).toBeUndefined();
+    expect(empty.resolvedQueryDate).toBeUndefined();
+    expect(empty.disambiguationCandidates).toBeUndefined();
+  });
+
+  it("ClaimsRenderContext contract: a context WITH the three carriers type-checks and round-trips structurally", () => {
+    const full: ClaimsRenderContext = {
+      requestText: "quais os horários na quinta?",
+      turnId: "turn-abc-123",
+      resolvedQueryDate: "2026-07-16",
+      disambiguationCandidates: [
+        { kind: "reservation", id: "res-1", label: "Reserva de sexta 20h" },
+        { kind: "reservation", id: "res-2", label: "Reserva de sábado 20h" },
+      ],
+      activeResources: [{ kind: "order", id: "order-1" }],
+    };
+    expect(full.turnId).toBe("turn-abc-123");
+    expect(full.resolvedQueryDate).toBe("2026-07-16");
+    expect(full.disambiguationCandidates).toHaveLength(2);
+    expect(full.disambiguationCandidates![0]).toEqual({
+      kind: "reservation",
+      id: "res-1",
+      label: "Reserva de sexta 20h",
+    });
   });
 
   it("RENDER-FROM-CLAIMS non-vacuity: WITHOUT a claimsRenderer the model draft text stands (byte-identical)", async () => {
