@@ -243,16 +243,29 @@ export async function handleTurn(
             customerId: capsule.customerId,
           })
         : undefined;
+    // ADOPTER-computed render carriers — `resolvedQueryDate` (BKL-152) and
+    // `disambiguationCandidates` (BKL-170) are DOMAIN values the loop cannot
+    // compute, so the adopter's optional `renderCarriersForTurn` seam derives them
+    // over THIS turn's ledger + the AUTHENTICATED customerId + the request text
+    // (mirroring the #8 `activeResourcesForTurn` seam). Unwired / no ledger →
+    // absent (byte-identical). Pure carrier passthrough: the loop threads the
+    // result with no logic of its own.
+    const renderCarriers =
+      capsule.renderCarriersForTurn !== undefined && ledger !== undefined
+        ? capsule.renderCarriersForTurn({
+            ledger,
+            customerId: capsule.customerId,
+            requestText: perception.text,
+          })
+        : undefined;
     // turnId — the loop's own per-turn id, threaded straight through as the
     // adopter's claims.terminal↔turn_trace join carrier (BKL-117). Pure carrier,
-    // no logic: the loop owns this value natively (like `requestText`). The two
-    // domain-owned carriers (`resolvedQueryDate` BKL-152 / `disambiguationCandidates`
-    // BKL-170) have NO claustrum-native source — the adopter populates those from
-    // its resolver output; the loop only publishes the type surface for them.
+    // no logic: the loop owns this value natively (like `requestText`).
     const renderedFromClaims = capsule.claimsRenderer.render(claims, {
       requestText: perception.text,
       turnId: capsule.turnId,
       ...(activeResources !== undefined ? { activeResources } : {}),
+      ...(renderCarriers ?? {}),
     });
     // Ask the adopter whether the render supersedes the draft for THIS turn. Core
     // holds NO policy — default (absent port) is "render", byte-identical to the

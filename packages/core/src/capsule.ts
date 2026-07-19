@@ -32,6 +32,7 @@ import type { ChannelDriver, ChannelKind } from "./ports/channel.js";
 import type { ClaimPlannerPort } from "./ports/claim-planner.js";
 import type {
   ActiveResourceRef,
+  ClaimsRenderContext,
   ClaimsRendererPort,
 } from "./ports/claims-renderer.js";
 import type { ExplainerPort } from "./ports/explainer.js";
@@ -108,6 +109,39 @@ export type ActiveResourcesForTurn = (args: {
   /** The AUTHENTICATED customer for this turn (the conductor identity). */
   readonly customerId: string;
 }) => readonly ActiveResourceRef[];
+
+/**
+ * Per-turn ADOPTER-computed render carriers deriver (the `resolvedQueryDate` /
+ * `disambiguationCandidates` siblings of {@link ActiveResourcesForTurn}).
+ *
+ * `ClaimsRenderContext.turnId` is claustrum-native, so `handleTurn` threads it
+ * directly. `ClaimsRenderContext.resolvedQueryDate` (ibatexas BKL-152) and
+ * `.disambiguationCandidates` (ibatexas BKL-170) are DOMAIN values only the
+ * adopter can compute (ibatexas `resolveQueriedScheduleDate` + the read
+ * executor's disambiguation) — so the loop cannot populate them itself, and
+ * without this seam those two carriers are unreachable. Like
+ * {@link ActiveResourcesForTurn}, the deriver runs at RENDER-FROM-CLAIMS over
+ * THIS turn's read-only Evidence Ledger + the AUTHENTICATED `customerId` + the
+ * inbound request text, and `handleTurn` SPREADS whatever it returns into the
+ * `ClaimsRenderContext` handed to the renderer. Return ONLY the carriers you
+ * resolved — omit a field and it stays absent (byte-identical).
+ *
+ * PURE carrier passthrough: claustrum invokes it and threads the result with no
+ * logic of its own; the adopter owns the derivation (and closes over its own
+ * clock — no clock/RNG/IO crosses this boundary). Absent → the render context
+ * carries neither carrier (byte-identical to today).
+ */
+export type RenderCarriersForTurn = (args: {
+  /** This turn's threaded, read-only Evidence Ledger (INVESTIGATE output). */
+  readonly ledger: EvidenceLedger;
+  /** The AUTHENTICATED customer for this turn (the conductor identity). */
+  readonly customerId: string;
+  /** The inbound request text (the §O#8 span-segmenter input). */
+  readonly requestText: string;
+}) => Pick<
+  ClaimsRenderContext,
+  "resolvedQueryDate" | "disambiguationCandidates"
+>;
 
 /**
  * Render-vs-draft precedence seam (BKL-155/153) — the adopter decides, per turn,
@@ -233,6 +267,15 @@ export interface Capsule {
    * the render context carries no active-resource signal (byte-identical).
    */
   readonly activeResourcesForTurn?: ActiveResourcesForTurn;
+  /**
+   * Optional per-turn ADOPTER-computed render carriers deriver (the
+   * `resolvedQueryDate` / `disambiguationCandidates` siblings of the #8 seam —
+   * see {@link RenderCarriersForTurn}). When wired AND this turn produced an
+   * Evidence Ledger, RENDER-FROM-CLAIMS spreads its result into the renderer's
+   * `ClaimsRenderContext` (`resolvedQueryDate` BKL-152 / `disambiguationCandidates`
+   * BKL-170). Absent → the render context carries neither carrier (byte-identical).
+   */
+  readonly renderCarriersForTurn?: RenderCarriersForTurn;
   readonly tools: ToolRegistry;
   readonly channels: ChannelMap;
   readonly responder: ResponderPort;
