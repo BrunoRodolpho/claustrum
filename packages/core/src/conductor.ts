@@ -25,6 +25,7 @@ import type {
   ChannelMap,
   ClaimsKernelDepsForTurn,
   ClaimsRenderPrecedence,
+  RenderCarriersForTurn,
 } from "./capsule.js";
 import type {
   Adjudicator,
@@ -119,6 +120,15 @@ export interface ConductorOptions {
    * Wired by the downstream adopter (ibatexas).
    */
   readonly activeResourcesForTurn?: ActiveResourcesForTurn;
+  /**
+   * Optional per-turn ADOPTER-computed render carriers deriver (the
+   * `resolvedQueryDate` / `disambiguationCandidates` siblings — see
+   * {@link RenderCarriersForTurn}). Threaded straight onto the Capsule;
+   * RENDER-FROM-CLAIMS spreads its result into the renderer's
+   * `ClaimsRenderContext`. Absent → byte-identical (no carriers). Wired by the
+   * downstream adopter (ibatexas).
+   */
+  readonly renderCarriersForTurn?: RenderCarriersForTurn;
   /** Optional ID seed for traces. Defaults to crypto.randomUUID. */
   readonly idFactory?: () => string;
   /**
@@ -384,6 +394,12 @@ export function createConductor(options: ConductorOptions): Conductor {
         // the authenticated customerId. Absent → no signal (byte-identical).
         ...(options.activeResourcesForTurn !== undefined
           ? { activeResourcesForTurn: options.activeResourcesForTurn }
+          : {}),
+        // resolvedQueryDate / disambiguationCandidates carriers — optional;
+        // threaded straight through. RENDER-FROM-CLAIMS spreads the adopter's
+        // result into the render context. Absent → no carriers (byte-identical).
+        ...(options.renderCarriersForTurn !== undefined
+          ? { renderCarriersForTurn: options.renderCarriersForTurn }
           : {}),
         tools: options.tools,
         channels,

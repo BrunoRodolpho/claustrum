@@ -59,6 +59,7 @@ import {
   type InvestigatorPort,
   type Plan,
   type PlannerPort,
+  type RenderCarriersForTurn,
   type ResponderPort,
   type TenantResolver,
   type ToolDefinition,
@@ -304,6 +305,7 @@ interface BundleOpts {
   readonly claimsRenderer?: ClaimsRendererPort;
   readonly claimsRenderPrecedence?: ClaimsRenderPrecedence;
   readonly activeResourcesForTurn?: ActiveResourcesForTurn;
+  readonly renderCarriersForTurn?: RenderCarriersForTurn;
   /** Arm the OUTPUT FIREWALL (tenant flag on) so a test can observe step 6b. */
   readonly enableOutputFirewall?: boolean;
 }
@@ -357,6 +359,9 @@ function makeBundle(opts: BundleOpts) {
       : {}),
     ...(opts.activeResourcesForTurn !== undefined
       ? { activeResourcesForTurn: opts.activeResourcesForTurn }
+      : {}),
+    ...(opts.renderCarriersForTurn !== undefined
+      ? { renderCarriersForTurn: opts.renderCarriersForTurn }
       : {}),
   });
   return { adjudicator, session, channel, executed, conductor };
@@ -749,6 +754,86 @@ describe("claims-loop — INVESTIGATE + CLAIMS-VALIDATE (SDD §M / §Q.6)", () =
     expect(seenTurnId).toBe(capsule.turnId);
     expect(typeof seenTurnId).toBe("string");
     expect(seenTurnId).not.toBe("");
+  });
+
+  it("RENDER-FROM-CLAIMS carriers seam: a wired renderCarriersForTurn derives resolvedQueryDate + disambiguationCandidates from (ledger, AUTHENTICATED customerId, requestText) and reaches the renderer as context", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let derivedForCustomer: string | undefined;
+    let seenRequestText: string | undefined;
+    let ledgerWasThreaded = false;
+    const renderCarriersForTurn: RenderCarriersForTurn = ({
+      ledger,
+      customerId,
+      requestText,
+    }) => {
+      derivedForCustomer = customerId;
+      seenRequestText = requestText;
+      ledgerWasThreaded = ledger instanceof EvidenceLedger;
+      return {
+        resolvedQueryDate: "2026-07-16",
+        disambiguationCandidates: [
+          { kind: "reservation", id: "res-1", label: "Reserva de sexta 20h" },
+        ],
+      };
+    };
+    let seenResolvedQueryDate: string | undefined;
+    let seenCandidates:
+      | readonly { readonly kind: string; readonly id: string; readonly label: string }[]
+      | undefined;
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        seenResolvedQueryDate = context?.resolvedQueryDate;
+        seenCandidates = context?.disambiguationCandidates;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({
+      investigator,
+      claimPlanner,
+      claimsRenderer,
+      renderCarriersForTurn,
+    });
+
+    await runTurn(conductor);
+
+    // Derived ONLY from the threaded ledger + the conductor's authenticated
+    // customer + the inbound request — the adopter-computed carriers reach the
+    // renderer through the context (BKL-152 / BKL-170 are now wireable).
+    expect(derivedForCustomer).toBe(CUSTOMER);
+    expect(ledgerWasThreaded).toBe(true);
+    expect(seenRequestText).toBe("por que meu pedido está atrasado?");
+    expect(seenResolvedQueryDate).toBe("2026-07-16");
+    expect(seenCandidates).toEqual([
+      { kind: "reservation", id: "res-1", label: "Reserva de sexta 20h" },
+    ]);
+  });
+
+  it("RENDER-FROM-CLAIMS carriers seam non-vacuity: WITHOUT the seam the render context carries NO resolvedQueryDate / disambiguationCandidates (byte-identical)", async () => {
+    const investigator = new RecordingInvestigator([stageEntry("stage:order-1")]);
+    const claimPlanner = fixedClaimPlanner([
+      soundCandidate("stage:order-1", "ORDER_FULFILLMENT_STAGE"),
+    ]);
+    let sawResolvedQueryDateKey = true;
+    let sawCandidatesKey = true;
+    const claimsRenderer: ClaimsRendererPort = {
+      render: (claims, context) => {
+        // Assert the KEYS are absent (not merely undefined) — a spread of an
+        // unwired seam must add nothing to the context object.
+        sawResolvedQueryDateKey = context !== undefined && "resolvedQueryDate" in context;
+        sawCandidatesKey =
+          context !== undefined && "disambiguationCandidates" in context;
+        return { text: `RENDERED[${claims.terminal}]` };
+      },
+    };
+    const { conductor } = makeBundle({ investigator, claimPlanner, claimsRenderer });
+
+    await runTurn(conductor);
+
+    expect(sawResolvedQueryDateKey).toBe(false);
+    expect(sawCandidatesKey).toBe(false);
   });
 
   it("ClaimsRenderContext contract: a context WITHOUT turnId/resolvedQueryDate/disambiguationCandidates is valid — absent === byte-identical", () => {
