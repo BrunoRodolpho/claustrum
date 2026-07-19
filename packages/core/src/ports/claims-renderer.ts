@@ -60,6 +60,46 @@ export interface ClaimsRenderContext {
    * a PURE input (no clock/RNG).
    */
   readonly activeResources?: readonly ActiveResourceRef[];
+  /**
+   * The loop's turn id for THIS turn (claustrum's `Capsule.turnId`) — the join
+   * key the adopter's renderer uses to correlate a rendered `claims.terminal`
+   * back to its `turn_trace` row (ibatexas rider BKL-117: claims.terminal ↔
+   * turn_trace join). Threaded straight from the loop (`handleTurn` supplies its
+   * own `turnId`); the renderer treats it as opaque and claustrum reads no meaning
+   * into it. Optional + structural: absent (an older loop, or a context built
+   * without it) the renderer behaves exactly as before (byte-identical). Plain
+   * data — the context stays a PURE input (no clock/RNG).
+   */
+  readonly turnId?: string;
+  /**
+   * The deterministically-resolved queried schedule date for THIS turn, as an ISO
+   * `YYYY-MM-DD` string (the weekday the request asked the schedule for). The
+   * adopter's §O#15 required-claim decomposer reads it to SUPPRESS the exact
+   * `weekday == today` decomposition (ibatexas rider BKL-152: exact
+   * weekday==today decomposer suppression). claustrum assigns the value no meaning
+   * and never computes it — the adopter resolves it deterministically and threads
+   * it here. Optional + structural: absent (unwired or not a schedule query) the
+   * renderer behaves exactly as before (byte-identical). Plain data — the context
+   * stays a PURE input (no clock/RNG).
+   */
+  readonly resolvedQueryDate?: string;
+  /**
+   * The disambiguation candidates for a CLARIFY-with-candidates terminal — the
+   * concrete options the adopter's renderer offers the customer back when the turn
+   * resolves to CLARIFY (ibatexas rider BKL-170: CLARIFY-with-candidates render).
+   * Each ref is the ADOPTER's own vocabulary — `kind` names the option class, `id`
+   * its stable handle, `label` the customer-facing text; claustrum assigns the
+   * triple no meaning and never populates it (the adopter threads it from its
+   * resolver output). Optional + structural: absent (not a CLARIFY-with-candidates
+   * turn, or the adopter does not disambiguate) the renderer behaves exactly as
+   * before (byte-identical). Plain data — the context stays a PURE input
+   * (no clock/RNG).
+   */
+  readonly disambiguationCandidates?: readonly {
+    readonly kind: string;
+    readonly id: string;
+    readonly label: string;
+  }[];
 }
 
 /**

@@ -243,8 +243,15 @@ export async function handleTurn(
             customerId: capsule.customerId,
           })
         : undefined;
+    // turnId — the loop's own per-turn id, threaded straight through as the
+    // adopter's claims.terminal↔turn_trace join carrier (BKL-117). Pure carrier,
+    // no logic: the loop owns this value natively (like `requestText`). The two
+    // domain-owned carriers (`resolvedQueryDate` BKL-152 / `disambiguationCandidates`
+    // BKL-170) have NO claustrum-native source — the adopter populates those from
+    // its resolver output; the loop only publishes the type surface for them.
     const renderedFromClaims = capsule.claimsRenderer.render(claims, {
       requestText: perception.text,
+      turnId: capsule.turnId,
       ...(activeResources !== undefined ? { activeResources } : {}),
     });
     // Ask the adopter whether the render supersedes the draft for THIS turn. Core
